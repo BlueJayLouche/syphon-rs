@@ -251,6 +251,15 @@ cargo run --example simple_client --release
 All `wgpu-hal` Metal API calls are isolated in `syphon-wgpu/src/metal_interop.rs`.
 When upgrading wgpu, edit only that file and update the version banner at the top.
 
+**Current version: wgpu 29.0.3.** Key constraints to keep in mind for future upgrades:
+
+- `as_hal` returns `Option<impl Deref<Target = A::Device>>` directly (no closure).
+- `Queue::as_raw()` does not exist — the internal `MTLCommandQueue` is inaccessible.
+  The blit path uses a separate `metal::CommandQueue` plus `device.poll()` for ordering.
+- `Device::raw_device()` returns `&Retained<ProtocolObject<dyn MTLDevice>>` (objc2 type).
+  Cast to metal-rs via a thin-pointer cast and `objc_retain()` before handing off.
+- `Texture::raw_handle()` returns `&ProtocolObject<dyn MTLTexture>` (same pattern).
+
 ## Building for Production
 
 ```bash

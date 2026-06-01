@@ -2,14 +2,16 @@
 name = "syphon-wgpu"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <you@example.com>"]
+authors = ["BlueJayLouche <bluejaylouche@gmail.com>"]
 description = "High-level wgpu integration for Syphon"
 license = "MIT"
-repository = "https://github.com/yourusername/rusty-404"
+repository = "https://github.com/BlueJayLouche/syphon-rs"
+keywords = ["syphon", "macos", "wgpu", "gpu", "texture-sharing"]
+categories = ["os::macos-apis", "graphics", "multimedia::video", "rendering::engine"]
 
 [dependencies]
-syphon-core = { path = "../syphon-core" }
-syphon-metal = { path = "../syphon-metal", features = ["wgpu"] }
+syphon-core = { path = "../syphon-core", version = "0.1.0" }
+syphon-metal = { path = "../syphon-metal", features = ["wgpu"], version = "0.1.0" }
 wgpu = "29.0"
 wgpu-hal = "29.0"
 log = "0.4"

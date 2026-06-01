@@ -1,5 +1,44 @@
 # Syphon Crate Changelog
 
+## Version 0.5.0 (2026-05-12)
+
+### Dependency Updates
+
+Bumped all dependencies to their current versions. No public API changes — all
+wgpu-hal interop is isolated in `syphon-wgpu/src/metal_interop.rs` as designed.
+
+#### wgpu 25 → 29
+
+Breaking internal change to the `wgpu-hal` interop layer:
+
+- `as_hal` no longer takes a closure; it now returns `Option<impl Deref<Target = A::Device>>`
+  directly. Metal device/texture handles are obtained via `raw_device()` and `raw_handle()`.
+- `Queue::as_raw()` was **removed** — the internal `MTLCommandQueue` is no longer accessible
+  via `wgpu-hal`. The blit path now uses a separate `metal::CommandQueue` stored on
+  `SyphonWgpuOutput` / `SyphonWgpuInput`. `device.poll(PollType::wait_indefinitely())`
+  is called before each blit to ensure prior wgpu GPU work has completed.
+- `PollType::Wait` is now a struct variant; use `PollType::wait_indefinitely()`.
+- `DeviceDescriptor` gained `experimental_features` (use `ExperimentalFeatures::default()`).
+- `RenderPassColorAttachment` gained `depth_slice: None`.
+- `RenderPassDescriptor` gained `multiview_mask: None`.
+- `InstanceDescriptor` dropped `Default`; use `InstanceDescriptor::new_without_display_handle()`.
+- `Instance::new` takes `InstanceDescriptor` by value, not by reference.
+
+#### Other crate updates
+
+| Crate | From | To |
+|-------|------|----|
+| `wgpu` / `wgpu-hal` | 25.0 | 29.0.3 |
+| `metal` | 0.31 | 0.33 |
+| `thiserror` | 1.0 | 2.0 |
+| `pollster` | 0.3 | 0.4 |
+| `core-foundation` | 0.9 | 0.10 |
+| `core-graphics` | 0.23 | 0.25 |
+| `io-surface` | 0.15 | 0.16 |
+| `cocoa` | 0.25 | 0.26 |
+
+---
+
 ## Version 0.4.0 (2026-03-18)
 
 ### Performance and API Improvements
@@ -89,7 +128,7 @@ CPU fallback is retained for non-Metal backends and logged as a warning.
 
 All `wgpu-hal` version-specific code is now in `syphon-wgpu/src/metal_interop.rs`.
 When upgrading wgpu, edit only that file and update the version banner.
-Current version: wgpu 25.0.
+(Current version as of v0.5.0: wgpu 29.0.3.)
 
 #### Safety: Internalized Autorelease Pools
 

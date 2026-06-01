@@ -85,7 +85,7 @@ Zero-Copy (GPU only):
 #### syphon-wgpu
 - `SyphonWgpuOutput` - Publish wgpu textures to Syphon (server); returns `PublishStatus`
 - `SyphonWgpuInput` - Receive frames as wgpu textures (client); GPU blit on Metal
-- `metal_interop` - All `wgpu-hal` version-specific code isolated here (wgpu 25.0)
+- `metal_interop` - All `wgpu-hal` version-specific code isolated here (wgpu 29.0)
 
 ---
 
@@ -103,10 +103,14 @@ let surface = surface_pool.acquire();
 // 2. Create IOSurface-backed destination texture (shares GPU memory)
 let dest_texture = create_iosurface_texture(&surface, width, height);
 
-// 3. Blit from wgpu source → IOSurface-backed destination on wgpu's own queue
-//    (metal_interop abstracts the wgpu-hal version-specific calls)
-metal_interop::with_metal_queue_and_texture(&queue, &texture, |raw_queue, src| {
-    let cmd_buf = raw_queue.new_command_buffer();
+// 3. Flush wgpu's pending GPU work before reading the source texture.
+//    (Queue::as_raw() was removed in wgpu 29 — we can't use wgpu's queue directly.)
+device.poll(wgpu::PollType::wait_indefinitely());
+
+// 4. Blit from wgpu source → IOSurface-backed destination on our Metal queue.
+//    metal_interop::with_metal_texture extracts the raw MTLTexture handle.
+metal_interop::with_metal_texture(&texture, |src| {
+    let cmd_buf = metal_queue.new_command_buffer();
     let blit = cmd_buf.new_blit_command_encoder();
     blit.copy_from_texture(
         src,
@@ -117,11 +121,9 @@ metal_interop::with_metal_queue_and_texture(&queue, &texture, |raw_queue, src| {
     );
     blit.end_encoding();
 
-    // 4. Publish to Syphon before committing
+    // 5. Publish to Syphon before committing
     server.publish_metal_texture(dest_texture, cmd_buf);
 
-    // 5. Commit on wgpu's queue — Metal ordering guarantees blit precedes
-    //    any subsequent wgpu render commands
     cmd_buf.commit();
 });
 ```
@@ -136,11 +138,16 @@ This implementation uses **native BGRA8Unorm format** throughout:
 
 This eliminates format conversion overhead and provides maximum performance.
 
-### Critical Synchronization
+### Synchronization (wgpu 29+)
 
-**Key Insight**: We must use wgpu's Metal command queue for the blit operation, not a separate queue. This ensures proper synchronization between wgpu's rendering and our blit.
+`wgpu-hal` no longer exposes the internal `MTLCommandQueue` — `Queue::as_raw()` was
+removed in wgpu 29. The blit therefore runs on a separate `metal::CommandQueue` created
+from the same `MTLDevice` as wgpu (so they share the same GPU timeline).
 
-Our solution performs the blit directly on wgpu's queue via `wgpu-hal`'s `as_hal()` API.
+To guarantee all prior wgpu render work has finished before the blit reads from the
+source texture, `device.poll(PollType::wait_indefinitely())` is called immediately
+before submitting the blit. This drains the wgpu submit queue and blocks until the
+GPU is idle.
 
 ---
 

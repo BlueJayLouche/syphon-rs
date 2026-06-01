@@ -430,11 +430,11 @@ objc = "0.2"
 ### "wgpu_hal not found"
 
 For zero-copy wgpu, you need wgpu with the Metal feature enabled. The crate currently
-targets wgpu 25.x:
+targets wgpu 29.x:
 
 ```toml
 [dependencies]
-wgpu = { version = "25", features = ["metal"] }
+wgpu = { version = "29", features = ["metal"] }
 ```
 
 All `wgpu-hal` interop is isolated in `syphon-wgpu/src/metal_interop.rs` — when
