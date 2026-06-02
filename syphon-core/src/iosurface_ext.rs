@@ -1,4 +1,9 @@
 //! Extended IOSurface bindings not provided by the io_surface crate
+//!
+//! These are raw FFI declarations: the constant names intentionally mirror the
+//! C API, and the full width/height accessors are kept for completeness even
+//! when not all are currently called.
+#![allow(non_upper_case_globals, dead_code)]
 
 use std::os::raw::c_void;
 use io_surface::IOSurfaceRef;

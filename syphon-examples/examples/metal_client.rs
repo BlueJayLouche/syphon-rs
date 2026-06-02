@@ -105,7 +105,7 @@ fn main() {
         // Main loop
         loop {
             match client.try_receive() {
-                Ok(Some(mut frame)) => {
+                Ok(Some(frame)) => {
                     frame_count += 1;
 
                     // ZERO-COPY: Create Metal texture directly from IOSurface

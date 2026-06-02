@@ -10,6 +10,9 @@ repository = "https://github.com/BlueJayLouche/syphon-rs"
 keywords = ["syphon", "macos", "wgpu", "gpu", "texture-sharing"]
 categories = ["os::macos-apis", "graphics", "multimedia::video", "rendering::engine"]
 
+[lints]
+workspace = true
+
 [dependencies]
 syphon-core = { path = "../syphon-core", version = "0.1.1" }
 syphon-metal = { path = "../syphon-metal", features = ["wgpu"], version = "0.1.1" }

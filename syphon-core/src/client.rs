@@ -156,7 +156,8 @@ impl Frame {
 /// only the framework does — so `Sync` is also sound.
 #[cfg(target_os = "macos")]
 struct FrameHandlerBlock(
-    block::RcBlock<(*mut objc::runtime::Object,), ()>,
+    // Held solely to keep the registered block alive; never read back.
+    #[allow(dead_code)] block::RcBlock<(*mut objc::runtime::Object,), ()>,
 );
 #[cfg(target_os = "macos")]
 unsafe impl Send for FrameHandlerBlock {}

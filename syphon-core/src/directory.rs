@@ -128,7 +128,7 @@ impl SyphonServerDirectory {
     /// Logs a warning and returns the first match when multiple servers share
     /// the same name. Use [`find_by_uuid`](Self::find_by_uuid) for precision.
     pub fn find_server(name: &str) -> Option<ServerInfo> {
-        let mut matches: Vec<ServerInfo> = Self::servers()
+        let matches: Vec<ServerInfo> = Self::servers()
             .into_iter()
             .filter(|s| s.name == name || s.app_name == name)
             .collect();

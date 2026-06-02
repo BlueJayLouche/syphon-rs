@@ -4,7 +4,7 @@
 //! Useful for testing basic Syphon functionality without the full application.
 //!
 //! Usage:
-//!   cargo run --example simple_client -- "Server Name"
+//!   cargo run -p syphon-core --example core_client -- "Server Name"
 //!
 //! If no server name is provided, it will list available servers and exit.
 
@@ -47,7 +47,7 @@ fn main() {
                     server.app_name);
             }
             
-            println!("\nUsage: cargo run --example simple_client -- \"Server Name\"");
+            println!("\nUsage: cargo run -p syphon-core --example core_client -- \"Server Name\"");
             std::process::exit(0);
         }
     };
@@ -55,7 +55,7 @@ fn main() {
     println!("\nConnecting to server: '{}'...", server_name);
     
     // Create and connect client
-    let mut client = match syphon_core::SyphonClient::connect(&server_name) {
+    let client = match syphon_core::SyphonClient::connect(&server_name) {
         Ok(c) => {
             println!("✓ Connected to server");
             println!("  Server name: {}", c.server_name());

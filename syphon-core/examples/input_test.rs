@@ -91,6 +91,7 @@ struct TestFrame {
     width: u32,
     height: u32,
     data: Vec<u8>, // RGBA
+    #[allow(dead_code)] // illustrative; mirrors the upstream frame layout
     timestamp: Instant,
 }
 

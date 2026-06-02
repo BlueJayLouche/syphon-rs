@@ -2,4 +2,5 @@
 Cargo.lock
 **/*.rs.bk
 *.pdb
+*.rcgu.o
 .DS_Store

@@ -293,9 +293,8 @@ impl SyphonWgpuInput {
 
         let mut ok = false;
 
-        unsafe {
-            objc::rc::autoreleasepool(|| {
-                metal_interop::with_metal_texture(output, |dst| {
+        objc::rc::autoreleasepool(|| {
+            metal_interop::with_metal_texture(output, |dst| {
                     let cmd = metal_queue.new_command_buffer();
                     let enc = cmd.new_blit_command_encoder();
                     enc.copy_from_texture(
@@ -316,7 +315,6 @@ impl SyphonWgpuInput {
                     ok = true;
                 });
             });
-        }
 
         ok
     }
