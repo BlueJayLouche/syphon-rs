@@ -14,7 +14,7 @@ categories = ["os::macos-apis", "graphics", "multimedia::video"]
 workspace = true
 
 [dependencies]
-syphon-core = { path = "../syphon-core", version = "0.1.1" }
+syphon-core = { path = "../syphon-core", version = "0.1.2" }
 log = "0.4"
 
 # macOS-specific dependencies
