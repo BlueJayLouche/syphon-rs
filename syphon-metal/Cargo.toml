@@ -1,6 +1,6 @@
 [package]
 name = "syphon-metal"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["BlueJayLouche <bluejaylouche@gmail.com>"]
 description = "Metal and IOSurface utilities for Syphon"

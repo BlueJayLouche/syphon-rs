@@ -1,6 +1,6 @@
 [package]
 name = "syphon-wgpu"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["BlueJayLouche <bluejaylouche@gmail.com>"]
 description = "High-level wgpu integration for Syphon"
@@ -15,7 +15,7 @@ workspace = true
 
 [dependencies]
 syphon-core = { path = "../syphon-core", version = "0.1.2" }
-syphon-metal = { path = "../syphon-metal", features = ["wgpu"], version = "0.1.1" }
+syphon-metal = { path = "../syphon-metal", features = ["wgpu"], version = "0.1.2" }
 wgpu = "29.0"
 wgpu-hal = "29.0"
 log = "0.4"
