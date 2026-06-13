@@ -6,7 +6,7 @@ zero-copy GPU efficiency.
 
 This crate provides safe wrappers around the Syphon Objective-C API:
 `SyphonServer`, `SyphonClient`, `Frame`, and `SyphonServerDirectory`, plus
-helpers for IOSurface and Metal device discovery.
+IOSurface helpers for zero-copy frame access.
 
 > **macOS only.** Requires `Syphon.framework` to be available at link/run time
 > (see [Requirements](#requirements)).
@@ -26,9 +26,9 @@ helpers for IOSurface and Metal device discovery.
 ```rust,no_run
 use syphon_core::{SyphonServer, SyphonClient, SyphonServerDirectory};
 
-// Publish frames
+// Advertise a server (publishing frames lives in syphon-metal / syphon-wgpu)
 let server = SyphonServer::new("My App", 1920, 1080)?;
-server.publish_iosurface(&my_surface)?;
+println!("Serving {} at {:?}", server.name(), server.dimensions());
 
 // Discover servers
 for info in SyphonServerDirectory::servers() {

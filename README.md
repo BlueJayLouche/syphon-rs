@@ -43,14 +43,10 @@ This workspace provides Rust crates for integrating Syphon frame sharing into yo
 ## Quick Start
 
 ```bash
-# Clone with submodules (includes Syphon framework)
-git clone --recursive https://github.com/BlueJayLouche/syphon-rs.git
-cd syphon
+git clone https://github.com/BlueJayLouche/syphon-rs.git
+cd syphon-rs
 
-# Or if already cloned
-git submodule update --init --recursive
-
-# Build the workspace
+# Build the workspace (Syphon.framework is bundled in syphon-core/frameworks)
 cargo build --workspace --release
 
 # Run examples
@@ -278,17 +274,15 @@ codesign --force --deep --sign - MyApp.app
 ## Documentation
 
 - **[ZERO_COPY_IMPLEMENTATION.md](./ZERO_COPY_IMPLEMENTATION.md)** — Complete technical details
-- **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** — Common issues and solutions
-- **[QUICKSTART.md](./QUICKSTART.md)** — Get started in 5 minutes
-- **[CHANGES.md](./CHANGES.md)** — Version history
+- **[CHANGELOG.md](./CHANGELOG.md)** — Version history
 
 ## Syphon Framework
 
-This repository includes the Syphon framework as a Git submodule:
+`Syphon.framework` ships bundled in `syphon-core/frameworks/`, so no extra setup
+is needed to build. To refresh it, the framework source is tracked as a submodule:
 
 ```bash
-cd syphon-lib/Syphon-Framework
-git pull origin main
+git submodule update --init syphon-lib/Syphon-Framework
 ```
 
 ## Troubleshooting
