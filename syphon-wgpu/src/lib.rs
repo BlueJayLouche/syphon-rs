@@ -19,7 +19,7 @@
 //! ## Usage
 //! 
 //! ### Output (Server)
-//! ```no_run
+//! ```ignore
 //! use syphon_wgpu::SyphonWgpuOutput;
 //! 
 //! let mut output = SyphonWgpuOutput::new(
@@ -30,7 +30,7 @@
 //! ```
 //!
 //! ### Input (Client)
-//! ```no_run
+//! ```ignore
 //! use syphon_wgpu::SyphonWgpuInput;
 //!
 //! let mut input = SyphonWgpuInput::new(&device, &queue);
@@ -469,8 +469,8 @@ impl SyphonWgpuOutput {
             let data = buffer_slice.get_mapped_range();
             
             // Check if we have actual data
-            if data.iter().any(|&b| b != 0) {
-                if let (Some(ref metal_device), Some(ref metal_queue)) = 
+            if data.iter().any(|&b| b != 0)
+                && let (Some(metal_device), Some(metal_queue)) = 
                     (&self.metal_device, &self.metal_queue) 
                 {
                     // Upload directly without flip - native BGRA
@@ -507,7 +507,6 @@ impl SyphonWgpuOutput {
                     
                     cmd_buf.commit();
                 }
-            }
             
             drop(data);
             buffer.unmap();

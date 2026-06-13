@@ -445,8 +445,9 @@ CPU fallback is retained for non-Metal backends and logged as a warning.
 ## Building
 
 ```bash
-# Clone with Syphon framework submodule
-git submodule update --init --recursive
+# Syphon.framework is bundled in syphon-core/frameworks — no submodule needed
+git clone https://github.com/BlueJayLouche/syphon-rs.git
+cd syphon-rs
 
 # Build the workspace
 cargo build --workspace --release

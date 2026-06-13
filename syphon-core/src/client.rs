@@ -292,14 +292,14 @@ impl SyphonClient {
     }
 
     #[cfg(target_os = "macos")]
-    unsafe fn connect_by_name_macos(name: &str) -> Result<Self> {
+    unsafe fn connect_by_name_macos(name: &str) -> Result<Self> { unsafe {
         Self::connect_by_name_with_tx(name, None)
-    }
+    }}
 
     #[cfg(target_os = "macos")]
-    unsafe fn connect_by_info_macos(info: &ServerInfo) -> Result<Self> {
+    unsafe fn connect_by_info_macos(info: &ServerInfo) -> Result<Self> { unsafe {
         Self::connect_by_info_with_tx(info, None)
-    }
+    }}
 
     /// Internal: find a server by name/app-name, then create a client.
     /// `tx` is `Some` when push delivery is requested.
@@ -307,7 +307,7 @@ impl SyphonClient {
     unsafe fn connect_by_name_with_tx(
         name: &str,
         tx: Option<std::sync::mpsc::SyncSender<()>>,
-    ) -> Result<Self> {
+    ) -> Result<Self> { unsafe {
         let dir = Self::shared_dir()?;
         Self::ensure_servers_populated(dir);
 
@@ -353,14 +353,14 @@ impl SyphonClient {
         let result = Self::create_client(first_match, info, tx);
         let _: () = msg_send![first_match, release];
         result
-    }
+    }}
 
     /// Internal: find a server by UUID, then create a client.
     #[cfg(target_os = "macos")]
     unsafe fn connect_by_info_with_tx(
         info: &ServerInfo,
         tx: Option<std::sync::mpsc::SyncSender<()>>,
-    ) -> Result<Self> {
+    ) -> Result<Self> { unsafe {
         let dir = Self::shared_dir()?;
         Self::ensure_servers_populated(dir);
 
@@ -386,7 +386,7 @@ impl SyphonClient {
         let result = Self::create_client(found, info.clone(), tx);
         let _: () = msg_send![found, release];
         result
-    }
+    }}
 
     /// Build a `SyphonMetalClient` from a retained server description pointer.
     ///
@@ -398,10 +398,14 @@ impl SyphonClient {
         server_desc: *mut Object,
         info: ServerInfo,
         tx: Option<std::sync::mpsc::SyncSender<()>>,
-    ) -> Result<Self> {
-        let device = crate::metal_device::default_device()
-            .map(|d| d.raw_device)
-            .ok_or_else(|| SyphonError::FrameworkNotFound("Metal not available".to_string()))?;
+    ) -> Result<Self> { unsafe {
+        unsafe extern "C" {
+            fn MTLCreateSystemDefaultDevice() -> *mut Object;
+        }
+        let device = MTLCreateSystemDefaultDevice();
+        if device.is_null() {
+            return Err(SyphonError::FrameworkNotFound("Metal not available".to_string()));
+        }
 
         let cls = Class::get("SyphonMetalClient")
             .ok_or_else(|| SyphonError::FrameworkNotFound(
@@ -455,7 +459,7 @@ impl SyphonClient {
         }
 
         Ok(Self { inner: ShareId::from_ptr(obj), info, _handler_block: handler_block })
-    }
+    }}
 
     #[cfg(target_os = "macos")]
     unsafe fn str_from_desc(desc: *mut Object, key: &str) -> String {
