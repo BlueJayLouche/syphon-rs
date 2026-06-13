@@ -317,9 +317,9 @@ pub mod wgpu_interop {
     /// The caller must not use the returned `metal::Device` past the point where
     /// the wgpu device is dropped. The device is retained internally, so it is
     /// safe to hold onto independently.
-    pub unsafe fn extract_metal_device(device: &wgpu::Device) -> Option<metal::Device> {
+    pub unsafe fn extract_metal_device(device: &wgpu::Device) -> Option<metal::Device> { unsafe {
         // Retain via direct libobjc call to avoid objc crate's sel! macro scoping.
-        extern "C" {
+        unsafe extern "C" {
             fn objc_retain(value: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
         }
 
@@ -332,7 +332,7 @@ pub mod wgpu_interop {
         // Retain before handing to metal-rs so its drop doesn't over-release.
         objc_retain(raw_ptr as *mut _);
         Some(metal::Device::from_ptr(raw_ptr))
-    }
+    }}
 
     /// Call `f` with the raw `MTLTextureRef` backing a wgpu texture.
     ///
@@ -344,7 +344,7 @@ pub mod wgpu_interop {
     pub unsafe fn with_metal_texture<F, R>(texture: &wgpu::Texture, f: F) -> R
     where
         F: FnOnce(Option<&metal::TextureRef>) -> R,
-    {
+    { unsafe {
         match texture.as_hal::<wgpu_hal::api::Metal>() {
             Some(hal_guard) => {
                 // raw_handle() → &ProtocolObject<dyn MTLTexture> (thin pointer)
@@ -354,7 +354,7 @@ pub mod wgpu_interop {
             }
             None => f(None),
         }
-    }
+    }}
 
     /// Get the raw `id<MTLTexture>` pointer from a wgpu texture.
     ///
@@ -365,11 +365,11 @@ pub mod wgpu_interop {
     /// The wgpu texture must remain alive while the returned pointer is in use.
     pub unsafe fn get_metal_texture_ptr(
         texture: &wgpu::Texture,
-    ) -> Option<*mut objc::runtime::Object> {
+    ) -> Option<*mut objc::runtime::Object> { unsafe {
         with_metal_texture(texture, |mtl_tex| {
             mtl_tex.map(|t| t.as_ptr() as *mut objc::runtime::Object)
         })
-    }
+    }}
 }
 
 #[cfg(test)]
@@ -399,11 +399,11 @@ mod tests {
         // This test only works on macOS with Metal available
         #[cfg(target_os = "macos")]
         {
-            if let Some(_ctx) = MetalContext::system_default() {
+            match MetalContext::system_default() { Some(_ctx) => {
                 println!("Metal context created successfully");
-            } else {
+            } _ => {
                 println!("Metal not available on this system");
-            }
+            }}
         }
     }
 }

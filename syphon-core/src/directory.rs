@@ -39,11 +39,13 @@ impl ServerInfo {
 pub struct SyphonServerDirectory;
 
 impl SyphonServerDirectory {
+    /// `[SyphonServerDirectory sharedDirectory]`, or `None` when the Syphon
+    /// framework isn't loaded (class not registered).
     #[cfg(target_os = "macos")]
-    fn shared_directory() -> *mut Object {
+    fn shared_directory() -> Option<*mut Object> {
         unsafe {
-            let cls = Class::get("SyphonServerDirectory").unwrap();
-            msg_send![cls, sharedDirectory]
+            let cls = Class::get("SyphonServerDirectory")?;
+            Some(msg_send![cls, sharedDirectory])
         }
     }
 
@@ -66,7 +68,9 @@ impl SyphonServerDirectory {
     unsafe fn servers_inner() -> Vec<ServerInfo> {
         use objc::rc::autoreleasepool;
 
-        let dir = Self::shared_directory();
+        let Some(dir) = Self::shared_directory() else {
+            return Vec::new();
+        };
 
         // Fast path: if the directory already has servers, return immediately.
         let servers: *mut Object = msg_send![dir, servers];
@@ -93,7 +97,7 @@ impl SyphonServerDirectory {
         let mut result = Vec::with_capacity(count);
 
         for i in 0..count {
-            autoreleasepool(|| {
+            autoreleasepool(|| unsafe {
                 let desc: *mut Object = msg_send![servers, objectAtIndex: i];
                 result.push(ServerInfo {
                     name:      Self::string_for_key(desc, "SyphonServerDescriptionNameKey"),

@@ -27,7 +27,7 @@ use metal::foreign_types::{ForeignType, ForeignTypeRef};
 #[cfg(target_os = "macos")]
 pub fn extract_metal_device(device: &wgpu::Device) -> Option<metal::Device> {
     // Retain via direct libobjc call to avoid objc crate's sel! macro scoping.
-    extern "C" {
+    unsafe extern "C" {
         fn objc_retain(value: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
     }
 

@@ -9,7 +9,7 @@ use std::os::raw::c_void;
 use io_surface::IOSurfaceRef;
 
 #[link(name = "IOSurface", kind = "framework")]
-extern "C" {
+unsafe extern "C" {
     /// Lock the IOSurface for access
     /// 
     /// # Arguments

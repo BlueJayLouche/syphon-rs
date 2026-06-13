@@ -9,25 +9,30 @@
 //! the Syphon Objective-C framework.
 //! 
 //! ## Usage
-//! 
+//!
+//! Publishing frames lives in the `syphon-metal` / `syphon-wgpu` crates; this
+//! crate handles server lifecycle, discovery, and receiving.
+//!
 //! ```no_run
 //! use syphon_core::{SyphonServer, SyphonClient, SyphonServerDirectory};
-//! 
-//! // Create a server to publish frames
+//!
+//! # fn main() -> syphon_core::Result<()> {
+//! // Advertise a server.
 //! let server = SyphonServer::new("My App", 1920, 1080)?;
-//! server.publish_iosurface(&my_surface)?;
-//! 
-//! // List available servers
-//! let servers = SyphonServerDirectory::servers();
-//! for server in servers {
-//!     println!("Found: {} ({})", server.name, server.app_name);
+//! println!("Serving {} at {:?}", server.name(), server.dimensions());
+//!
+//! // List available servers.
+//! for info in SyphonServerDirectory::servers() {
+//!     println!("Found: {}", info.display_name());
 //! }
-//! 
-//! // Connect to a server
+//!
+//! // Connect to a server and grab a frame.
 //! let client = SyphonClient::connect("Resolume Arena")?;
-//! if let Some(frame) = client.try_receive()? {
-//!     // Use frame...
+//! if let Some(_frame) = client.try_receive()? {
+//!     // Use the frame...
 //! }
+//! # Ok(())
+//! # }
 //! ```
 
 // syphon-core - Objective-C bindings for Syphon
@@ -39,22 +44,12 @@ mod server;
 mod client;
 mod directory;
 mod utils;
-mod metal_device;
 
 pub use error::{SyphonError, Result};
 pub use server::{SyphonServer, ServerOptions};
 pub use client::{SyphonClient, Frame};
 pub use directory::{SyphonServerDirectory, ServerInfo};
 pub use utils::{to_nsstring, from_nsstring, class_exists};
-pub use metal_device::{
-    MetalDeviceInfo,
-    default_device,
-    available_devices,
-    recommended_high_performance_device,
-    check_device_compatibility,
-    validate_device_match,
-    get_device_info,
-};
 
 /// Check if Syphon is available on this system
 pub fn is_available() -> bool {

@@ -41,6 +41,9 @@ pub fn to_nsstring(s: &str) -> Result<*mut Object> {
 }
 
 /// Convert an NSString to a Rust String
+// ponytail: caller must pass a valid NSString (or null) pointer — null is handled,
+// garbage is UB. Kept non-`unsafe` to avoid churning every FFI call site.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[cfg(target_os = "macos")]
 pub fn from_nsstring(obj: *mut Object) -> String {
     use objc::{msg_send, sel, sel_impl};

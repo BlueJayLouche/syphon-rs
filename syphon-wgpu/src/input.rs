@@ -127,7 +127,7 @@ impl SyphonWgpuInput {
     }
 
     pub fn is_connected(&self) -> bool {
-        self.client.as_ref().map_or(false, |c| {
+        self.client.as_ref().is_some_and(|c| {
             #[cfg(target_os = "macos")]
             { c.is_connected() }
             #[cfg(not(target_os = "macos"))]
@@ -240,7 +240,7 @@ impl SyphonWgpuInput {
                 );
             }
 
-            return true;
+            true
         }
 
         #[cfg(not(target_os = "macos"))]

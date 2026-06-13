@@ -109,7 +109,7 @@ impl SyphonServer {
     #[cfg(target_os = "macos")]
     fn create_default_metal_device() -> Option<*mut Object> {
         unsafe {
-            extern "C" {
+            unsafe extern "C" {
                 fn MTLCreateSystemDefaultDevice() -> *mut Object;
             }
             
