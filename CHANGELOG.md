@@ -3,6 +3,23 @@
 Versions match the crates published on
 [crates.io](https://crates.io/crates/syphon-core).
 
+## syphon-core 0.2.1 (2026-07-04)
+
+### Fixed
+
+- The crates.io package is now actually linkable. `cargo package` follows
+  symlinks, so 0.2.0 shipped the framework payload flattened (no
+  `Syphon.framework/` wrapper) and the emitted
+  `rustc-link-search=framework=` could never satisfy `-framework Syphon`.
+  The build script now reassembles a canonical `Syphon.framework`
+  (Versions/A + symlinks) in `OUT_DIR` and links against that, from both
+  repo checkouts and the published tarball.
+- Added `links = "Syphon"`: direct dependents can read
+  `DEP_SYPHON_FRAMEWORK_DIR` to locate the reassembled framework (e.g. to
+  bundle it into an `.app` or add a dev-run rpath).
+- The package now includes only `frameworks/Versions/A/**` (no more
+  symlink-followed duplicate payload).
+
 ## 0.2.0 (2026-06-13)
 
 ### Breaking
