@@ -17,7 +17,7 @@
 
 use syphon_core::{SyphonClient, Result, ServerInfo};
 #[cfg(target_os = "macos")]
-use crate::metal_interop;
+use syphon_metal::wgpu_interop;
 
 pub struct SyphonWgpuInput {
     client: Option<SyphonClient>,
@@ -55,8 +55,7 @@ impl SyphonWgpuInput {
 
     #[cfg(target_os = "macos")]
     fn build_metal_ctx(device: &wgpu::Device) -> Option<syphon_metal::MetalContext> {
-        let ctx = metal_interop::extract_metal_device(device)
-            .map(|raw| unsafe { syphon_metal::MetalContext::from_raw_device(raw) });
+        let ctx = syphon_metal::MetalContext::from_wgpu_device(device);
         if ctx.is_none() {
             log::warn!("[SyphonWgpuInput] wgpu device is not Metal-backed; will use CPU fallback");
         }
@@ -294,7 +293,8 @@ impl SyphonWgpuInput {
         let mut ok = false;
 
         objc::rc::autoreleasepool(|| {
-            metal_interop::with_metal_texture(output, |dst| {
+            unsafe { wgpu_interop::with_metal_texture(output, |dst| {
+                    let Some(dst) = dst else { return };
                     let cmd = metal_queue.new_command_buffer();
                     let enc = cmd.new_blit_command_encoder();
                     enc.copy_from_texture(
@@ -313,7 +313,7 @@ impl SyphonWgpuInput {
                     enc.end_encoding();
                     cmd.commit();
                     ok = true;
-                });
+                }) };
             });
 
         ok

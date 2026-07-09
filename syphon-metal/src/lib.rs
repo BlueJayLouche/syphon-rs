@@ -228,68 +228,55 @@ impl MetalContext {
         }
     }
     
-    /// Blit from a source Metal texture to a destination IOSurface-backed texture
-    /// 
-    /// This performs a GPU-to-GPU copy without involving the CPU.
+    /// Encode a GPU blit from `src_texture` into an IOSurface-backed texture.
+    ///
+    /// Returns the **uncommitted** command buffer and the destination texture so
+    /// the caller can reference both (e.g. hand them to Syphon's
+    /// `publishFrameTexture:onCommandBuffer:`) before committing.
+    ///
+    /// Returns `None` if the destination texture could not be created.
     pub fn blit_to_iosurface(
         &self,
-        src_texture: &metal::Texture,
+        src_texture: &metal::TextureRef,
         dest_surface: &io_surface::IOSurface,
         width: u32,
         height: u32,
-    ) -> metal::CommandBuffer {
-        // Create destination texture from IOSurface
-        let dest_texture = self.create_texture_from_iosurface(dest_surface, width, height)
-            .expect("Failed to create destination texture from IOSurface");
-        
-        // Create command buffer
+    ) -> Option<(metal::CommandBuffer, metal::Texture)> {
+        let dest_texture = self.create_texture_from_iosurface(dest_surface, width, height)?;
+
         let cmd_buf = self.queue.new_command_buffer();
-        
-        // Create blit encoder
         let blit_encoder = cmd_buf.new_blit_command_encoder();
-        
-        // Copy from source to destination
         blit_encoder.copy_from_texture(
             src_texture,
             0, // source level
             0, // source slice
             metal::MTLOrigin { x: 0, y: 0, z: 0 },
-            metal::MTLSize { 
-                width: width as u64, 
-                height: height as u64, 
-                depth: 1 
+            metal::MTLSize {
+                width: width as u64,
+                height: height as u64,
+                depth: 1,
             },
             &dest_texture,
             0, // destination level
             0, // destination slice
             metal::MTLOrigin { x: 0, y: 0, z: 0 },
         );
-        
         blit_encoder.end_encoding();
-        
-        // We need to keep the dest_texture alive until the blit completes
-        // Store it in the command buffer's user info (hacky but works)
-        // A better approach would be to use a completion handler
-        
-        // Convert from &CommandBufferRef to CommandBuffer
-        // cmd_buf is &CommandBufferRef, we need to convert to CommandBuffer
-        // Use to_owned() to get an owned CommandBuffer
-        cmd_buf.to_owned()
+
+        // The encoder retains referenced resources, so dest_texture stays alive
+        // through GPU execution even if the caller drops it after commit.
+        Some((cmd_buf.to_owned(), dest_texture))
     }
-    
-    /// Blit from a wgpu texture to an IOSurface-backed texture
-    /// 
-    /// # Safety
-    /// This requires access to wgpu's internal Metal texture through wgpu-hal.
-    /// The source_texture_ptr must be a valid `id<MTLTexture>`.
-    pub unsafe fn blit_wgpu_to_iosurface(
-        &self,
-        src_texture: &metal::Texture,
-        dest_surface: &io_surface::IOSurface,
-        width: u32,
-        height: u32,
-    ) -> metal::CommandBuffer {
-        self.blit_to_iosurface(src_texture, dest_surface, width, height)
+}
+
+#[cfg(all(feature = "wgpu", target_os = "macos"))]
+impl MetalContext {
+    /// Create a Metal context from a wgpu device for zero-copy interop.
+    ///
+    /// Returns `None` when the wgpu device is not backed by Metal.
+    pub fn from_wgpu_device(device: &wgpu::Device) -> Option<Self> {
+        let raw = unsafe { wgpu_interop::extract_metal_device(device) }?;
+        Some(unsafe { Self::from_raw_device(raw) })
     }
 }
 
@@ -354,21 +341,6 @@ pub mod wgpu_interop {
             }
             None => f(None),
         }
-    }}
-
-    /// Get the raw `id<MTLTexture>` pointer from a wgpu texture.
-    ///
-    /// Returns `None` if the texture is not Metal-backed.
-    /// The pointer is only valid while the wgpu texture is alive.
-    ///
-    /// # Safety
-    /// The wgpu texture must remain alive while the returned pointer is in use.
-    pub unsafe fn get_metal_texture_ptr(
-        texture: &wgpu::Texture,
-    ) -> Option<*mut objc::runtime::Object> { unsafe {
-        with_metal_texture(texture, |mtl_tex| {
-            mtl_tex.map(|t| t.as_ptr() as *mut objc::runtime::Object)
-        })
     }}
 }
 
