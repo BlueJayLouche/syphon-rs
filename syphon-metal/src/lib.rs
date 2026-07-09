@@ -1,34 +1,53 @@
 //! # Syphon Metal
-//! 
+//!
 //! Metal-specific utilities for Syphon, including IOSurface creation
 //! and Metal texture interop for zero-copy GPU-to-GPU sharing.
-//! 
+//!
+//! Built on `objc2-metal` / `objc2-io-surface` — the same bindings wgpu
+//! itself uses, so wgpu interop is type-safe with no pointer punning.
+//!
 //! ## Usage
-//! 
+//!
 //! ```ignore
 //! use syphon_metal::{IOSurfacePool, MetalContext};
-//! 
+//!
 //! // Create a Metal context from a wgpu device (for zero-copy)
 //! let ctx = MetalContext::from_wgpu_device(&wgpu_device)?;
-//! 
+//!
 //! // Create an IOSurface pool for efficient reuse
 //! let pool = IOSurfacePool::new(1920, 1080, 3);
-//! 
+//!
 //! // Get a surface and create a Metal texture from it
 //! let surface = pool.acquire().unwrap();
 //! let texture = ctx.create_texture_from_iosurface(&surface, 1920, 1080)?;
 //! ```
 
-// Re-export io_surface
 #[cfg(target_os = "macos")]
-pub use io_surface::IOSurface;
+use objc2::rc::Retained;
+#[cfg(target_os = "macos")]
+use objc2::runtime::ProtocolObject;
+#[cfg(target_os = "macos")]
+use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFString};
+#[cfg(target_os = "macos")]
+use objc2_metal::{
+    MTLCommandBuffer, MTLCommandQueue, MTLDevice, MTLOrigin, MTLPixelFormat, MTLSize,
+    MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
+};
+
+// Re-export the IOSurface types used in this crate's public API.
+#[cfg(target_os = "macos")]
+pub use objc2_io_surface::IOSurfaceRef;
+
+/// An owned (retained) IOSurface.
+#[cfg(target_os = "macos")]
+pub type IOSurface = CFRetained<IOSurfaceRef>;
 
 /// A pool of reusable IOSurfaces for efficient frame publishing
 #[cfg(target_os = "macos")]
 pub struct IOSurfacePool {
     width: u32,
     height: u32,
-    surfaces: Vec<io_surface::IOSurface>,
+    surfaces: Vec<IOSurface>,
 }
 
 #[cfg(target_os = "macos")]
@@ -36,41 +55,41 @@ impl IOSurfacePool {
     /// Create a new pool with the specified capacity
     pub fn new(width: u32, height: u32, capacity: usize) -> Self {
         let mut surfaces = Vec::with_capacity(capacity);
-        
+
         for _ in 0..capacity {
             if let Some(surface) = create_iosurface(width, height) {
                 surfaces.push(surface);
             }
         }
-        
+
         Self {
             width,
             height,
             surfaces,
         }
     }
-    
+
     /// Acquire an IOSurface from the pool
     /// Returns None if all surfaces are in use
-    pub fn acquire(&mut self) -> Option<io_surface::IOSurface> {
+    pub fn acquire(&mut self) -> Option<IOSurface> {
         self.surfaces.pop()
     }
-    
+
     /// Return an IOSurface to the pool
-    pub fn release(&mut self, surface: io_surface::IOSurface) {
+    pub fn release(&mut self, surface: IOSurface) {
         self.surfaces.push(surface);
     }
-    
+
     /// Get pool capacity
     pub fn capacity(&self) -> usize {
         self.surfaces.capacity()
     }
-    
+
     /// Get available surface count
     pub fn available(&self) -> usize {
         self.surfaces.len()
     }
-    
+
     /// Get dimensions
     pub fn dimensions(&self) -> (u32, u32) {
         (self.width, self.height)
@@ -94,202 +113,147 @@ impl IOSurfacePool {
     pub fn dimensions(&self) -> (u32, u32) { (self.width, self.height) }
 }
 
-/// Create an IOSurface with the specified dimensions
+/// Create a BGRA8 IOSurface with the specified dimensions
 #[cfg(target_os = "macos")]
-fn create_iosurface(width: u32, height: u32) -> Option<io_surface::IOSurface> {
-    use core_foundation::base::{CFType, TCFType};
-    use core_foundation::dictionary::CFDictionary;
-    use core_foundation::number::CFNumber;
-    use core_foundation::string::CFString;
-    
-    let width_num = CFNumber::from(width as i64);
-    let height_num = CFNumber::from(height as i64);
-    let bytes_per_elem = CFNumber::from(4i64); // RGBA8 = 4 bytes
-    let pixel_format = CFNumber::from(0x42475241i64); // 'BGRA'
-    
-    let keys: Vec<CFString> = vec![
-        CFString::from_static_string("IOSurfaceWidth"),
-        CFString::from_static_string("IOSurfaceHeight"),
-        CFString::from_static_string("IOSurfaceBytesPerElement"),
-        CFString::from_static_string("IOSurfacePixelFormat"),
-    ];
-    
-    // Create slices of references for the pairs
-    let pairs: Vec<(CFString, CFType)> = vec![
-        (keys[0].clone(), width_num.as_CFType().clone()),
-        (keys[1].clone(), height_num.as_CFType().clone()),
-        (keys[2].clone(), bytes_per_elem.as_CFType().clone()),
-        (keys[3].clone(), pixel_format.as_CFType().clone()),
-    ];
-    
-    let props = CFDictionary::from_CFType_pairs(&pairs);
-    
-    Some(io_surface::new(&props))
+fn create_iosurface(width: u32, height: u32) -> Option<IOSurface> {
+    use objc2_io_surface::{
+        kIOSurfaceBytesPerElement, kIOSurfaceHeight, kIOSurfacePixelFormat, kIOSurfaceWidth,
+    };
+
+    let width_num = CFNumber::new_i64(width as i64);
+    let height_num = CFNumber::new_i64(height as i64);
+    let bytes_per_elem = CFNumber::new_i64(4); // RGBA8 = 4 bytes
+    let pixel_format = CFNumber::new_i64(0x42475241); // 'BGRA'
+
+    unsafe {
+        let keys: [&CFString; 4] = [
+            kIOSurfaceWidth,
+            kIOSurfaceHeight,
+            kIOSurfaceBytesPerElement,
+            kIOSurfacePixelFormat,
+        ];
+        let values: [&CFNumber; 4] = [&width_num, &height_num, &bytes_per_elem, &pixel_format];
+        let props = CFDictionary::from_slices(&keys, &values);
+        IOSurfaceRef::new(props.as_opaque())
+    }
 }
 
 /// Metal context for zero-copy interop with wgpu
-/// 
+///
 /// This holds the Metal device and command queue for creating
 /// IOSurface-backed textures and performing GPU blits.
 #[cfg(target_os = "macos")]
 pub struct MetalContext {
-    device: metal::Device,
-    queue: metal::CommandQueue,
+    device: Retained<ProtocolObject<dyn MTLDevice>>,
+    queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
 }
-
-// SAFETY: `metal::Device` and `metal::CommandQueue` are both thread-safe per
-// Apple's Metal documentation — they are reference-counted ObjC objects that
-// can be used concurrently from multiple threads. Creating command buffers and
-// textures from them is explicitly documented as thread-safe.
-#[cfg(target_os = "macos")]
-unsafe impl Send for MetalContext {}
-#[cfg(target_os = "macos")]
-unsafe impl Sync for MetalContext {}
 
 #[cfg(target_os = "macos")]
 impl MetalContext {
-    /// Create a new Metal context from a raw Metal device
-    /// 
-    /// # Safety
-    /// The device must be valid and remain valid for the lifetime of this context
-    pub unsafe fn from_raw_device(device: metal::Device) -> Self {
-        let queue = device.new_command_queue();
-        Self { device, queue }
+    /// Create a Metal context from an existing Metal device.
+    ///
+    /// Returns `None` if a command queue cannot be created.
+    pub fn from_device(device: Retained<ProtocolObject<dyn MTLDevice>>) -> Option<Self> {
+        let queue = device.newCommandQueue()?;
+        Some(Self { device, queue })
     }
-    
+
     /// Create a Metal context from the system default device
     pub fn system_default() -> Option<Self> {
-        metal::Device::system_default().map(|device| {
-            let queue = device.new_command_queue();
-            Self { device, queue }
-        })
+        Self::from_device(objc2_metal::MTLCreateSystemDefaultDevice()?)
     }
-    
-    /// Get the raw Metal device
-    pub fn device(&self) -> &metal::Device {
+
+    /// Get the Metal device
+    pub fn device(&self) -> &ProtocolObject<dyn MTLDevice> {
         &self.device
     }
-    
-    /// Get the raw Metal command queue
-    pub fn queue(&self) -> &metal::CommandQueue {
+
+    /// Get the Metal command queue
+    pub fn queue(&self) -> &ProtocolObject<dyn MTLCommandQueue> {
         &self.queue
     }
-    
-    /// Create a Metal texture from an IOSurface
-    /// 
-    /// This creates a texture that shares memory with the IOSurface,
+
+    /// Create a Metal texture that shares memory with the IOSurface,
     /// enabling zero-copy GPU-to-GPU transfers.
-    /// 
-    /// Uses raw Objective-C calls since metal-rs doesn't expose IOSurface support.
     pub fn create_texture_from_iosurface(
         &self,
-        surface: &io_surface::IOSurface,
+        surface: &IOSurfaceRef,
         width: u32,
         height: u32,
-    ) -> Option<metal::Texture> {
-        use objc::runtime::Object;
-        use objc::class;
-        use core_foundation::base::TCFType;
-        use objc::{msg_send, sel, sel_impl};
-        use cocoa::foundation::NSUInteger;
-        use metal::{MTLStorageMode, MTLTextureUsage, MTLPixelFormat};
-        use foreign_types_shared::ForeignType;
-        
+    ) -> Option<Retained<ProtocolObject<dyn MTLTexture>>> {
         unsafe {
-            // Create texture descriptor
-            let desc: *mut Object = msg_send![class!(MTLTextureDescriptor), new];
-            let _: () = msg_send![desc, setPixelFormat: MTLPixelFormat::BGRA8Unorm];
-            let _: () = msg_send![desc, setWidth: width as NSUInteger];
-            let _: () = msg_send![desc, setHeight: height as NSUInteger];
-            let _: () = msg_send![desc, setStorageMode: MTLStorageMode::Shared];
-            let _: () = msg_send![desc, setUsage: MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead];
-            
-            // Get the raw IOSurfaceRef
-            let surface_ref = surface.as_concrete_TypeRef();
-            
-            // Call newTextureWithDescriptor:iosurface:plane:
-            let device_ptr = self.device.as_ptr() as *mut Object;
-            let texture_ptr: *mut Object = msg_send![
-                device_ptr,
-                newTextureWithDescriptor: desc
-                iosurface: surface_ref
-                plane: 0 as NSUInteger
-            ];
-            
-            // Release the descriptor
-            let _: () = msg_send![desc, release];
-            
-            if texture_ptr.is_null() {
-                None
-            } else {
-                // Convert to metal::Texture
-                Some(metal::Texture::from_ptr(texture_ptr as *mut metal::MTLTexture))
-            }
+            let desc = MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                MTLPixelFormat::BGRA8Unorm,
+                width as usize,
+                height as usize,
+                false,
+            );
+            desc.setStorageMode(MTLStorageMode::Shared);
+            desc.setUsage(MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead);
+
+            self.device
+                .newTextureWithDescriptor_iosurface_plane(&desc, surface, 0)
         }
     }
-    
-    /// Blit from a source Metal texture to a destination IOSurface-backed texture
-    /// 
-    /// This performs a GPU-to-GPU copy without involving the CPU.
+
+    /// Encode a GPU blit from `src_texture` into an IOSurface-backed texture.
+    ///
+    /// Returns the **uncommitted** command buffer and the destination texture so
+    /// the caller can reference both (e.g. hand them to Syphon's
+    /// `publishFrameTexture:onCommandBuffer:`) before committing.
+    ///
+    /// Returns `None` if the destination texture or command buffer could not
+    /// be created.
+    #[allow(clippy::type_complexity)]
     pub fn blit_to_iosurface(
         &self,
-        src_texture: &metal::Texture,
-        dest_surface: &io_surface::IOSurface,
+        src_texture: &ProtocolObject<dyn MTLTexture>,
+        dest_surface: &IOSurfaceRef,
         width: u32,
         height: u32,
-    ) -> metal::CommandBuffer {
-        // Create destination texture from IOSurface
-        let dest_texture = self.create_texture_from_iosurface(dest_surface, width, height)
-            .expect("Failed to create destination texture from IOSurface");
-        
-        // Create command buffer
-        let cmd_buf = self.queue.new_command_buffer();
-        
-        // Create blit encoder
-        let blit_encoder = cmd_buf.new_blit_command_encoder();
-        
-        // Copy from source to destination
-        blit_encoder.copy_from_texture(
-            src_texture,
-            0, // source level
-            0, // source slice
-            metal::MTLOrigin { x: 0, y: 0, z: 0 },
-            metal::MTLSize { 
-                width: width as u64, 
-                height: height as u64, 
-                depth: 1 
-            },
-            &dest_texture,
-            0, // destination level
-            0, // destination slice
-            metal::MTLOrigin { x: 0, y: 0, z: 0 },
-        );
-        
-        blit_encoder.end_encoding();
-        
-        // We need to keep the dest_texture alive until the blit completes
-        // Store it in the command buffer's user info (hacky but works)
-        // A better approach would be to use a completion handler
-        
-        // Convert from &CommandBufferRef to CommandBuffer
-        // cmd_buf is &CommandBufferRef, we need to convert to CommandBuffer
-        // Use to_owned() to get an owned CommandBuffer
-        cmd_buf.to_owned()
+    ) -> Option<(
+        Retained<ProtocolObject<dyn MTLCommandBuffer>>,
+        Retained<ProtocolObject<dyn MTLTexture>>,
+    )> {
+        let dest_texture = self.create_texture_from_iosurface(dest_surface, width, height)?;
+
+        let cmd_buf = self.queue.commandBuffer()?;
+        let blit_encoder = cmd_buf.blitCommandEncoder()?;
+        unsafe {
+            use objc2_metal::MTLBlitCommandEncoder;
+            blit_encoder
+                .copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                    src_texture,
+                    0, // source slice
+                    0, // source level
+                    MTLOrigin { x: 0, y: 0, z: 0 },
+                    MTLSize {
+                        width: width as usize,
+                        height: height as usize,
+                        depth: 1,
+                    },
+                    &dest_texture,
+                    0, // destination slice
+                    0, // destination level
+                    MTLOrigin { x: 0, y: 0, z: 0 },
+                );
+        }
+        use objc2_metal::MTLCommandEncoder;
+        blit_encoder.endEncoding();
+
+        // The encoder retains referenced resources, so dest_texture stays alive
+        // through GPU execution even if the caller drops it after commit.
+        Some((cmd_buf, dest_texture))
     }
-    
-    /// Blit from a wgpu texture to an IOSurface-backed texture
-    /// 
-    /// # Safety
-    /// This requires access to wgpu's internal Metal texture through wgpu-hal.
-    /// The source_texture_ptr must be a valid `id<MTLTexture>`.
-    pub unsafe fn blit_wgpu_to_iosurface(
-        &self,
-        src_texture: &metal::Texture,
-        dest_surface: &io_surface::IOSurface,
-        width: u32,
-        height: u32,
-    ) -> metal::CommandBuffer {
-        self.blit_to_iosurface(src_texture, dest_surface, width, height)
+}
+
+#[cfg(all(feature = "wgpu", target_os = "macos"))]
+impl MetalContext {
+    /// Create a Metal context from a wgpu device for zero-copy interop.
+    ///
+    /// Returns `None` when the wgpu device is not backed by Metal.
+    pub fn from_wgpu_device(device: &wgpu::Device) -> Option<Self> {
+        Self::from_device(wgpu_interop::extract_metal_device(device)?)
     }
 }
 
@@ -302,74 +266,47 @@ impl MetalContext {
     pub fn system_default() -> Option<Self> { None }
 }
 
-/// Helper to extract raw Metal handles from wgpu objects using wgpu-hal
+/// Helpers to extract Metal handles from wgpu objects using wgpu-hal.
 ///
-/// Updated for wgpu 29: `as_hal` no longer accepts a closure; it returns
-/// `Option<impl Deref<Target = ...>>` directly. `Queue::as_raw()` was removed —
-/// the MTLCommandQueue is no longer publicly accessible via wgpu-hal.
+/// **All `wgpu-hal` version-specific code lives here.**
+/// When upgrading wgpu, edit only this module.
+///
+/// wgpu-hal 29 returns `objc2-metal` types directly, so these are safe
+/// clones/borrows — no pointer punning.
 #[cfg(all(feature = "wgpu", target_os = "macos"))]
 pub mod wgpu_interop {
-    use foreign_types_shared::{ForeignType, ForeignTypeRef};
+    use objc2::rc::Retained;
+    use objc2::runtime::ProtocolObject;
+    use objc2_metal::{MTLDevice, MTLTexture};
 
-    /// Extract the raw Metal device from a wgpu device.
+    /// Extract the Metal device backing a wgpu device.
     ///
-    /// # Safety
-    /// The caller must not use the returned `metal::Device` past the point where
-    /// the wgpu device is dropped. The device is retained internally, so it is
-    /// safe to hold onto independently.
-    pub unsafe fn extract_metal_device(device: &wgpu::Device) -> Option<metal::Device> { unsafe {
-        // Retain via direct libobjc call to avoid objc crate's sel! macro scoping.
-        unsafe extern "C" {
-            fn objc_retain(value: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
-        }
+    /// Returns `None` when the wgpu device is not backed by Metal.
+    /// The device is retained, so it can be held independently of wgpu.
+    pub fn extract_metal_device(
+        device: &wgpu::Device,
+    ) -> Option<Retained<ProtocolObject<dyn MTLDevice>>> {
+        // SAFETY: as_hal only requires the device to be alive, which the
+        // reference guarantees; the returned device is retained (cloned).
+        let hal_guard = unsafe { device.as_hal::<wgpu_hal::api::Metal>() }?;
+        Some(hal_guard.raw_device().clone())
+    }
 
-        let hal_guard = device.as_hal::<wgpu_hal::api::Metal>()?;
-        // raw_device() → &Retained<ProtocolObject<dyn MTLDevice>>
-        // ProtocolObject<P> is #[repr(C)] over zero-sized AnyObject; the pointer
-        // is a thin ObjC id<MTLDevice>. Both metal-rs and objc2 wrap the same type.
-        let proto_ref = &**hal_guard.raw_device();
-        let raw_ptr = proto_ref as *const _ as *mut metal::MTLDevice;
-        // Retain before handing to metal-rs so its drop doesn't over-release.
-        objc_retain(raw_ptr as *mut _);
-        Some(metal::Device::from_ptr(raw_ptr))
-    }}
-
-    /// Call `f` with the raw `MTLTextureRef` backing a wgpu texture.
+    /// Call `f` with the Metal texture backing a wgpu texture.
     ///
     /// `f` receives `None` when the texture is not Metal-backed.
     /// The reference is only valid for the duration of `f`.
-    ///
-    /// # Safety
-    /// The wgpu texture must remain valid (not dropped) while `f` runs.
-    pub unsafe fn with_metal_texture<F, R>(texture: &wgpu::Texture, f: F) -> R
+    pub fn with_metal_texture<F, R>(texture: &wgpu::Texture, f: F) -> R
     where
-        F: FnOnce(Option<&metal::TextureRef>) -> R,
-    { unsafe {
-        match texture.as_hal::<wgpu_hal::api::Metal>() {
-            Some(hal_guard) => {
-                // raw_handle() → &ProtocolObject<dyn MTLTexture> (thin pointer)
-                let proto_ref = hal_guard.raw_handle();
-                let raw_ptr = proto_ref as *const _ as *const metal::MTLTexture;
-                f(Some(metal::TextureRef::from_ptr(raw_ptr as *mut _)))
-            }
+        F: FnOnce(Option<&ProtocolObject<dyn MTLTexture>>) -> R,
+    {
+        // SAFETY: as_hal only requires the texture to be alive; the borrow
+        // handed to `f` cannot outlive the hal guard.
+        match unsafe { texture.as_hal::<wgpu_hal::api::Metal>() } {
+            Some(hal_guard) => f(Some(hal_guard.raw_handle())),
             None => f(None),
         }
-    }}
-
-    /// Get the raw `id<MTLTexture>` pointer from a wgpu texture.
-    ///
-    /// Returns `None` if the texture is not Metal-backed.
-    /// The pointer is only valid while the wgpu texture is alive.
-    ///
-    /// # Safety
-    /// The wgpu texture must remain alive while the returned pointer is in use.
-    pub unsafe fn get_metal_texture_ptr(
-        texture: &wgpu::Texture,
-    ) -> Option<*mut objc::runtime::Object> { unsafe {
-        with_metal_texture(texture, |mtl_tex| {
-            mtl_tex.map(|t| t.as_ptr() as *mut objc::runtime::Object)
-        })
-    }}
+    }
 }
 
 #[cfg(test)]
@@ -380,20 +317,20 @@ mod tests {
     fn test_surface_pool() {
         let mut pool = IOSurfacePool::new(640, 480, 3);
         assert_eq!(pool.capacity(), 3);
-        
+
         #[cfg(target_os = "macos")]
         {
             assert_eq!(pool.available(), 3);
-            
+
             let surface = pool.acquire();
             assert!(surface.is_some());
             assert_eq!(pool.available(), 2);
-            
+
             pool.release(surface.unwrap());
             assert_eq!(pool.available(), 3);
         }
     }
-    
+
     #[test]
     fn test_metal_context_creation() {
         // This test only works on macOS with Metal available

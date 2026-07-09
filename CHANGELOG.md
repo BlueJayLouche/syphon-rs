@@ -3,6 +3,37 @@
 Versions match the crates published on
 [crates.io](https://crates.io/crates/syphon-core).
 
+## 0.3.0 (2026-07-09)
+
+Migrated off the deprecated `metal-rs` (`metal` crate) and, at the public
+API boundary, off the unmaintained `objc 0.2` — onto `objc2` /
+`objc2-metal` / `objc2-io-surface`, the same bindings wgpu-hal 29 already
+uses. This removes the RUSTSEC-2024-0436 (`paste`, unmaintained) advisory
+from the dependency tree and turns the wgpu↔Metal pointer-punning bridge
+into safe clones/borrows.
+
+### Breaking
+
+- **syphon-metal**: `MetalContext` now holds
+  `Retained<ProtocolObject<dyn MTLDevice/MTLCommandQueue>>`;
+  `from_raw_device` → `from_device`. `IOSurface` is now
+  `CFRetained<objc2_io_surface::IOSurfaceRef>` (the `io-surface` crate is
+  gone). `create_texture_from_iosurface` / `blit_to_iosurface` take and
+  return objc2-metal types; `blit_to_iosurface` returns the *uncommitted*
+  `(command buffer, texture)` pair. `wgpu_interop::extract_metal_device` /
+  `with_metal_texture` are now safe functions returning objc2-metal types;
+  `get_metal_texture_ptr` and `blit_wgpu_to_iosurface` were removed.
+  New: `MetalContext::from_wgpu_device` (behind the `wgpu` feature).
+- **syphon-core**: `Frame::metal_texture_ptr` and
+  `SyphonServer::publish_metal_texture` /
+  `new_with_name_and_device(_and_options)` use `*mut objc2::runtime::AnyObject`
+  instead of `*mut objc::runtime::Object`. `Frame::iosurface()` returns
+  `&objc2_io_surface::IOSurfaceRef`; `Frame::iosurface_ref()` removed.
+  `to_nsstring` / `from_nsstring` are no longer exported.
+- **syphon-wgpu**: no API changes beyond the types re-exported from the
+  crates above; internal Metal interop is deduplicated into
+  `syphon_metal::wgpu_interop`.
+
 ## syphon-core 0.2.1 (2026-07-04)
 
 ### Fixed

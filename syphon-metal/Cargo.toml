@@ -1,6 +1,6 @@
 [package]
 name = "syphon-metal"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["BlueJayLouche <bluejaylouche@gmail.com>"]
 description = "Metal and IOSurface utilities for Syphon"
@@ -14,18 +14,15 @@ categories = ["os::macos-apis", "graphics", "multimedia::video"]
 workspace = true
 
 [dependencies]
-syphon-core = { path = "../syphon-core", version = "0.2.0" }
+syphon-core = { path = "../syphon-core", version = "0.3.0" }
 log = "0.4"
 
 # macOS-specific dependencies
 [target.'cfg(target_os = "macos")'.dependencies]
-metal = "0.33"
-core-foundation = "0.10"
-core-graphics = "0.25"
-io-surface = "0.16"
-cocoa = "0.26"
-objc = "0.2"
-foreign-types-shared = "0.3"
+objc2 = "0.6"
+objc2-metal = { version = "0.3", features = ["objc2-io-surface"] }
+objc2-io-surface = "0.3"
+objc2-core-foundation = "0.3"
 
 # Optional wgpu interop
 wgpu = { version = "29.0", optional = true }

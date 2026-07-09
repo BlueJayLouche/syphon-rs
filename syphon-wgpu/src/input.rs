@@ -17,7 +17,14 @@
 
 use syphon_core::{SyphonClient, Result, ServerInfo};
 #[cfg(target_os = "macos")]
-use crate::metal_interop;
+use syphon_metal::wgpu_interop;
+#[cfg(target_os = "macos")]
+use objc2::runtime::ProtocolObject;
+#[cfg(target_os = "macos")]
+use objc2_metal::{
+    MTLBlitCommandEncoder, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLOrigin,
+    MTLSize, MTLTexture,
+};
 
 pub struct SyphonWgpuInput {
     client: Option<SyphonClient>,
@@ -55,8 +62,7 @@ impl SyphonWgpuInput {
 
     #[cfg(target_os = "macos")]
     fn build_metal_ctx(device: &wgpu::Device) -> Option<syphon_metal::MetalContext> {
-        let ctx = metal_interop::extract_metal_device(device)
-            .map(|raw| unsafe { syphon_metal::MetalContext::from_raw_device(raw) });
+        let ctx = syphon_metal::MetalContext::from_wgpu_device(device);
         if ctx.is_none() {
             log::warn!("[SyphonWgpuInput] wgpu device is not Metal-backed; will use CPU fallback");
         }
@@ -273,48 +279,46 @@ impl SyphonWgpuInput {
     fn gpu_blit(
         frame: &syphon_core::Frame,
         output: &wgpu::Texture,
-        metal_queue: &metal::CommandQueue,
+        metal_queue: &ProtocolObject<dyn MTLCommandQueue>,
     ) -> bool {
-        use metal::foreign_types::ForeignType;
-        use std::mem::ManuallyDrop;
-
         let frame_tex_ptr = frame.metal_texture_ptr();
         if frame_tex_ptr.is_null() {
             log::warn!("[SyphonWgpuInput] newFrameImage returned nil, cannot GPU blit");
             return false;
         }
 
-        // Wrap the pointer as metal::Texture so we can pass &*src to the blit
-        // encoder.  ManuallyDrop prevents the implicit ObjC release on drop —
-        // Frame::drop already owns the matching retain.
-        let src = ManuallyDrop::new(unsafe {
-            metal::Texture::from_ptr(frame_tex_ptr as *mut _)
-        });
+        // SAFETY: the pointer is a valid id<MTLTexture> retained by `frame`
+        // (released in Frame::drop); we only borrow it for the blit.
+        let src: &ProtocolObject<dyn MTLTexture> =
+            unsafe { &*(frame_tex_ptr as *const ProtocolObject<dyn MTLTexture>) };
 
         let mut ok = false;
 
-        objc::rc::autoreleasepool(|| {
-            metal_interop::with_metal_texture(output, |dst| {
-                    let cmd = metal_queue.new_command_buffer();
-                    let enc = cmd.new_blit_command_encoder();
-                    enc.copy_from_texture(
-                        &src,
+        objc2::rc::autoreleasepool(|_| {
+            wgpu_interop::with_metal_texture(output, |dst| {
+                let Some(dst) = dst else { return };
+                let Some(cmd) = metal_queue.commandBuffer() else { return };
+                let Some(enc) = cmd.blitCommandEncoder() else { return };
+                unsafe {
+                    enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                        src,
                         0, 0,
-                        metal::MTLOrigin { x: 0, y: 0, z: 0 },
-                        metal::MTLSize {
-                            width:  frame.width  as u64,
-                            height: frame.height as u64,
+                        MTLOrigin { x: 0, y: 0, z: 0 },
+                        MTLSize {
+                            width:  frame.width  as usize,
+                            height: frame.height as usize,
                             depth:  1,
                         },
                         dst,
                         0, 0,
-                        metal::MTLOrigin { x: 0, y: 0, z: 0 },
+                        MTLOrigin { x: 0, y: 0, z: 0 },
                     );
-                    enc.end_encoding();
-                    cmd.commit();
-                    ok = true;
-                });
+                }
+                enc.endEncoding();
+                cmd.commit();
+                ok = true;
             });
+        });
 
         ok
     }

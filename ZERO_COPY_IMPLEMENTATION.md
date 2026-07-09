@@ -200,11 +200,11 @@ loop {
 For advanced use cases, you can access the raw IOSurface reference:
 
 ```rust
-// Get the raw IOSurfaceRef (for interop with other libraries)
-let surface_ref: io_surface::IOSurfaceRef = frame.iosurface_ref();
+// Borrow the IOSurface (objc2-io-surface type, for interop with other libraries)
+let surface: &objc2_io_surface::IOSurfaceRef = frame.iosurface();
 
 // Get the IOSurface ID (for logging/debugging)
-let surface_id: io_surface::IOSurfaceID = frame.iosurface_id();
+let surface_id = frame.iosurface_id();
 ```
 
 ### Frame Locking (CPU Access)

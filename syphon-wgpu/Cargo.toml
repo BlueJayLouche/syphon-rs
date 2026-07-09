@@ -1,6 +1,6 @@
 [package]
 name = "syphon-wgpu"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["BlueJayLouche <bluejaylouche@gmail.com>"]
 description = "High-level wgpu integration for Syphon"
@@ -14,20 +14,16 @@ categories = ["os::macos-apis", "graphics", "multimedia::video", "rendering::eng
 workspace = true
 
 [dependencies]
-syphon-core = { path = "../syphon-core", version = "0.2.0" }
-syphon-metal = { path = "../syphon-metal", features = ["wgpu"], version = "0.2.0" }
+syphon-core = { path = "../syphon-core", version = "0.3.0" }
+syphon-metal = { path = "../syphon-metal", features = ["wgpu"], version = "0.3.0" }
 wgpu = "29.0"
 wgpu-hal = "29.0"
 log = "0.4"
 bytemuck = "1.16"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-metal = "0.33"
-objc = "0.2"
-io-surface = "0.16"
-core-foundation = "0.10"
-cocoa = "0.26"
-pollster = "0.4"
+objc2 = "0.6"
+objc2-metal = "0.3"
 
 [dev-dependencies]
 env_logger = "0.11"

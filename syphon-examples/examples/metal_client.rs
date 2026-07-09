@@ -10,6 +10,9 @@
 
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
+use objc2_metal::MTLTexture;
+
 fn main() {
     // Initialize logging
     env_logger::init();
@@ -132,7 +135,7 @@ fn main() {
                                 frame.height,
                                 tex.width(),
                                 tex.height(),
-                                tex.pixel_format()
+                                tex.pixelFormat()
                             );
 
                             // Print every 30th frame to avoid spam
