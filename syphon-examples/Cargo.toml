@@ -19,3 +19,4 @@ bytemuck = { version = "1.21", features = ["derive"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-metal = "0.3"
+objc2-core-foundation = { version = "0.3", features = ["CFRunLoop"] }
