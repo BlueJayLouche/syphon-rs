@@ -1,6 +1,6 @@
 [package]
 name = "syphon-metal"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["BlueJayLouche <bluejaylouche@gmail.com>"]
 description = "Metal and IOSurface utilities for Syphon"
@@ -14,7 +14,7 @@ categories = ["os::macos-apis", "graphics", "multimedia::video"]
 workspace = true
 
 [dependencies]
-syphon-core = { path = "../syphon-core", version = "0.2.0" }
+syphon-core = { path = "../syphon-core", version = "0.3.0" }
 log = "0.4"
 
 # macOS-specific dependencies

@@ -14,10 +14,10 @@ license = "MIT"
 repository = "https://github.com/BlueJayLouche/syphon-rs"
 
 [workspace.lints.rust]
-# The `objc 0.2` `msg_send!` macro expands to `#[cfg(feature = "cargo-clippy")]`,
-# which newer rustc flags under check-cfg. Declare it as an expected value.
+# syphon-core's internals still use `objc 0.2`, whose `msg_send!` macro expands
+# to `#[cfg(feature = "cargo-clippy")]` — newer rustc flags it under check-cfg.
+# Declare it as an expected value. (See OBJC2_MIGRATION.md for the remaining work.)
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
-# The FFI layer is built on `io_surface`/`cocoa`, which are deprecated in favor
-# of the `objc2-*` crates. Migrating is tracked separately; suppress the noise
-# until then rather than churn the working interop.
+# syphon-core's FFI internals use `io_surface`/`cocoa`, deprecated in favor of
+# the `objc2-*` crates. Suppress until those internals are migrated.
 deprecated = "allow"
