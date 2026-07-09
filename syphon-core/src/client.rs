@@ -49,8 +49,11 @@ impl Frame {
 
     /// Zero-copy access: create a Metal texture directly from this surface.
     #[cfg(target_os = "macos")]
-    pub fn iosurface(&self) -> &io_surface::IOSurface {
-        &self.surface
+    pub fn iosurface(&self) -> &objc2_io_surface::IOSurfaceRef {
+        // SAFETY: io_surface::IOSurfaceRef and objc2_io_surface::IOSurfaceRef
+        // both represent the same underlying CF object; the pointer cast is a
+        // no-op and the borrow is tied to &self, which retains the surface.
+        unsafe { &*(self.surface.as_concrete_TypeRef() as *const objc2_io_surface::IOSurfaceRef) }
     }
 
     /// Raw pointer to the `id<MTLTexture>` returned by `newFrameImage`.
@@ -64,13 +67,8 @@ impl Frame {
     ///
     /// Returns `null` if `newFrameImage` returned `nil` (server stopped, etc.).
     #[cfg(target_os = "macos")]
-    pub fn metal_texture_ptr(&self) -> *mut objc::runtime::Object {
-        self.frame_texture
-    }
-
-    #[cfg(target_os = "macos")]
-    pub fn iosurface_ref(&self) -> io_surface::IOSurfaceRef {
-        self.surface.as_concrete_TypeRef()
+    pub fn metal_texture_ptr(&self) -> *mut objc2::runtime::AnyObject {
+        self.frame_texture.cast()
     }
 
     /// Lock the surface for CPU reading. Returns `(base_addr, seed)`.

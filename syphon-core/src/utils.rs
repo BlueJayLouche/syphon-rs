@@ -11,7 +11,7 @@ use objc::runtime::Object;
 /// # Safety
 /// The returned pointer must be released when done
 #[cfg(target_os = "macos")]
-pub fn to_nsstring(s: &str) -> Result<*mut Object> {
+pub(crate) fn to_nsstring(s: &str) -> Result<*mut Object> {
     use objc::runtime::Class;
     use objc::{msg_send, sel, sel_impl};
     
@@ -45,7 +45,7 @@ pub fn to_nsstring(s: &str) -> Result<*mut Object> {
 // garbage is UB. Kept non-`unsafe` to avoid churning every FFI call site.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[cfg(target_os = "macos")]
-pub fn from_nsstring(obj: *mut Object) -> String {
+pub(crate) fn from_nsstring(obj: *mut Object) -> String {
     use objc::{msg_send, sel, sel_impl};
     
     unsafe {

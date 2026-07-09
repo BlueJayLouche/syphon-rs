@@ -49,7 +49,7 @@ pub use error::{SyphonError, Result};
 pub use server::{SyphonServer, ServerOptions};
 pub use client::{SyphonClient, Frame};
 pub use directory::{SyphonServerDirectory, ServerInfo};
-pub use utils::{to_nsstring, from_nsstring, class_exists};
+pub use utils::class_exists;
 
 /// Check if Syphon is available on this system
 pub fn is_available() -> bool {

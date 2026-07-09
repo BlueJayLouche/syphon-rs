@@ -80,10 +80,11 @@ impl SyphonServer {
         { Err(SyphonError::NotAvailable) }
     }
 
-    /// Create a new Syphon server with a specific Metal device.
+    /// Create a new Syphon server with a specific Metal device
+    /// (an `id<MTLDevice>` pointer).
     pub fn new_with_name_and_device(
         name: &str,
-        metal_device: *mut Object,
+        metal_device: *mut objc2::runtime::AnyObject,
         width: u32,
         height: u32,
     ) -> Result<Self> {
@@ -95,13 +96,13 @@ impl SyphonServer {
     /// Create a new Syphon server with a specific Metal device and options.
     pub fn new_with_name_and_device_and_options(
         name: &str,
-        metal_device: *mut Object,
+        metal_device: *mut objc2::runtime::AnyObject,
         width: u32,
         height: u32,
         options: ServerOptions,
     ) -> Result<Self> {
         #[cfg(target_os = "macos")]
-        { Self::new_macos(name, metal_device, width, height, options) }
+        { Self::new_macos(name, metal_device.cast(), width, height, options) }
         #[cfg(not(target_os = "macos"))]
         { Err(SyphonError::NotAvailable) }
     }
@@ -214,11 +215,14 @@ impl SyphonServer {
     #[cfg(target_os = "macos")]
     pub unsafe fn publish_metal_texture(
         &self,
-        texture: *mut Object,        // id<MTLTexture>
-        command_buffer: *mut Object, // id<MTLCommandBuffer>
+        texture: *mut objc2::runtime::AnyObject,        // id<MTLTexture>
+        command_buffer: *mut objc2::runtime::AnyObject, // id<MTLCommandBuffer>
     ) {
         use cocoa::foundation::{NSRect, NSPoint, NSSize};
         use objc::rc::autoreleasepool;
+
+        let texture: *mut Object = texture.cast();
+        let command_buffer: *mut Object = command_buffer.cast();
 
         autoreleasepool(|| {
             let region = NSRect {

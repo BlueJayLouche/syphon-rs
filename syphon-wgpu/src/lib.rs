@@ -90,16 +90,12 @@ pub use input::SyphonWgpuInput;
 use syphon_metal::wgpu_interop;
 
 #[cfg(target_os = "macos")]
-use metal::*;
+use objc2::runtime::{AnyObject, ProtocolObject};
 #[cfg(target_os = "macos")]
-use metal::foreign_types::{ForeignType, ForeignTypeRef};
-// sel and sel_impl are needed for msg_send! macro expansion even though the
-// lint reports them as unused — rustc does not track macro-internal references.
-#[cfg(target_os = "macos")]
-#[allow(unused_imports)]
-use objc::{sel, sel_impl};
-#[cfg(target_os = "macos")]
-use objc::runtime::Object;
+use objc2_metal::{
+    MTLCommandBuffer, MTLCommandQueue, MTLDevice, MTLOrigin, MTLPixelFormat, MTLRegion,
+    MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
+};
 
 /// High-level wgpu-to-Syphon output with zero-copy GPU transfer
 /// 
@@ -200,7 +196,8 @@ impl SyphonWgpuOutput {
         };
 
         // Create the Syphon server with the Metal device and server options.
-        let device_ptr = metal_ctx.device().as_ref() as *const DeviceRef as *mut Object;
+        let device_ptr =
+            metal_ctx.device() as *const ProtocolObject<dyn MTLDevice> as *mut AnyObject;
         let server = SyphonServer::new_with_name_and_device_and_options(
             name, device_ptr, width, height, config.server_options.clone()
         )?;
@@ -283,26 +280,24 @@ impl SyphonWgpuOutput {
         // all prior GPU rendering is complete before we blit.
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
 
-        unsafe {
-            objc::rc::autoreleasepool(|| {
-                wgpu_interop::with_metal_texture(texture, |src_texture| {
-                    let Some(src_texture) = src_texture else { return };
+        objc2::rc::autoreleasepool(|_| {
+            wgpu_interop::with_metal_texture(texture, |src_texture| {
+                let Some(src_texture) = src_texture else { return };
 
-                    let Some((cmd_buf, dest_texture)) = self.metal_ctx.blit_to_iosurface(
-                        src_texture, &surface, self.width, self.height
-                    ) else { return };
+                let Some((cmd_buf, dest_texture)) = self.metal_ctx.blit_to_iosurface(
+                    src_texture, &surface, self.width, self.height
+                ) else { return };
 
-                    // Notify Syphon before committing so it can reference
-                    // the command buffer for synchronisation.
-                    let tex_ptr = dest_texture.as_ptr() as *mut Object;
-                    let cmd_ptr = cmd_buf.as_ptr() as *mut Object;
-                    self.server.publish_metal_texture(tex_ptr, cmd_ptr);
+                // Notify Syphon before committing so it can reference
+                // the command buffer for synchronisation.
+                let tex_ptr = &*dest_texture as *const ProtocolObject<dyn MTLTexture> as *mut AnyObject;
+                let cmd_ptr = &*cmd_buf as *const ProtocolObject<dyn MTLCommandBuffer> as *mut AnyObject;
+                unsafe { self.server.publish_metal_texture(tex_ptr, cmd_ptr) };
 
-                    cmd_buf.commit();
-                    published = true;
-                });
+                cmd_buf.commit();
+                published = true;
             });
-        }
+        });
 
         // Triple-buffering ensures the GPU has finished with this surface before
         // it's reused — return it even if publish failed so we don't leak it.
@@ -384,38 +379,43 @@ impl SyphonWgpuOutput {
             // Check if we have actual data
             if data.iter().any(|&b| b != 0) {
                 // Upload directly without flip - native BGRA
-                let desc = TextureDescriptor::new();
-                desc.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
-                desc.set_width(self.width as u64);
-                desc.set_height(self.height as u64);
-                desc.set_storage_mode(MTLStorageMode::Managed);
-                desc.set_usage(MTLTextureUsage::ShaderRead);
+                let upload = unsafe {
+                    let desc = MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                        MTLPixelFormat::BGRA8Unorm,
+                        self.width as usize,
+                        self.height as usize,
+                        false,
+                    );
+                    desc.setStorageMode(MTLStorageMode::Managed);
+                    desc.setUsage(MTLTextureUsage::ShaderRead);
+                    self.metal_ctx.device().newTextureWithDescriptor(&desc)
+                };
 
-                let mtl_texture = self.metal_ctx.device().new_texture(&desc);
+                if let (Some(mtl_texture), Some(cmd_buf)) =
+                    (upload, self.metal_ctx.queue().commandBuffer())
+                {
+                    unsafe {
+                        mtl_texture.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+                            MTLRegion {
+                                origin: MTLOrigin { x: 0, y: 0, z: 0 },
+                                size: MTLSize {
+                                    width: self.width as usize,
+                                    height: self.height as usize,
+                                    depth: 1,
+                                },
+                            },
+                            0,
+                            std::ptr::NonNull::new_unchecked(data.as_ptr() as *mut _),
+                            (self.width * 4) as usize,
+                        );
 
-                mtl_texture.replace_region(
-                    MTLRegion {
-                        origin: MTLOrigin { x: 0, y: 0, z: 0 },
-                        size: MTLSize {
-                            width: self.width as u64,
-                            height: self.height as u64,
-                            depth: 1,
-                        },
-                    },
-                    0,
-                    data.as_ptr() as *const _,
-                    (self.width * 4) as u64,
-                );
+                        let texture_ptr = &*mtl_texture as *const ProtocolObject<dyn MTLTexture> as *mut AnyObject;
+                        let cmd_buf_ptr = &*cmd_buf as *const ProtocolObject<dyn MTLCommandBuffer> as *mut AnyObject;
+                        self.server.publish_metal_texture(texture_ptr, cmd_buf_ptr);
+                    }
 
-                let cmd_buf = self.metal_ctx.queue().new_command_buffer();
-
-                unsafe {
-                    let texture_ptr = mtl_texture.as_ptr() as *mut Object;
-                    let cmd_buf_ptr = cmd_buf.as_ptr() as *mut Object;
-                    self.server.publish_metal_texture(texture_ptr, cmd_buf_ptr);
+                    cmd_buf.commit();
                 }
-
-                cmd_buf.commit();
             }
             
             drop(data);

@@ -29,6 +29,9 @@ thiserror = "2.0"
 
 # macOS-specific dependencies
 [target.'cfg(target_os = "macos")'.dependencies]
+# Public API boundary types (AnyObject / IOSurfaceRef) — internals still use objc 0.2.
+objc2 = "0.6"
+objc2-io-surface = "0.3"
 objc = "0.2"
 objc_id = "0.1"
 objc-foundation = "0.1"
