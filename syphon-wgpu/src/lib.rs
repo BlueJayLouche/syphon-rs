@@ -374,7 +374,12 @@ impl SyphonWgpuOutput {
         }
         
         if ready {
-            let data = buffer_slice.get_mapped_range();
+            // wgpu 30 returns a Result here: mapping can fail if the range is
+            // unmapped or misaligned. Nothing to publish in that case.
+            let Ok(data) = buffer_slice.get_mapped_range() else {
+                buffer.unmap(); // map_async succeeded, so it is still mapped
+                return;
+            };
             
             // Check if we have actual data
             if data.iter().any(|&b| b != 0) {

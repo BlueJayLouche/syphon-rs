@@ -90,6 +90,7 @@ fn setup_wgpu() -> Result<(wgpu::Device, wgpu::Queue), Box<dyn std::error::Error
         power_preference: wgpu::PowerPreference::HighPerformance,
         compatible_surface: None,
         force_fallback_adapter: false,
+        ..Default::default()
     })).map_err(|e| format!("Failed to find adapter: {:?}", e))?;
     
     println!("  Adapter: {:?}", adapter.get_info().name);

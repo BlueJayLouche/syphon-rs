@@ -41,7 +41,7 @@ fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture, w:
     slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r.is_ok()); });
     let _ = device.poll(wgpu::PollType::wait_indefinitely());
     assert!(rx.recv().unwrap(), "buffer map failed");
-    let data = slice.get_mapped_range().to_vec();
+    let data = slice.get_mapped_range().expect("mapped range").to_vec();
     buf.unmap();
     data
 }
