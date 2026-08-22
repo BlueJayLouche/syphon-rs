@@ -11,7 +11,7 @@ workspace = true
 syphon-core = { path = "../syphon-core" }
 syphon-metal = { path = "../syphon-metal" }
 syphon-wgpu = { path = "../syphon-wgpu" }
-wgpu = "29.0"
+wgpu = "30.0"
 pollster = "0.4"
 env_logger = "0.11"
 log = "0.4"

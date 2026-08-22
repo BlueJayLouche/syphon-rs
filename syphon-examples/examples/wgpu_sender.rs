@@ -47,6 +47,7 @@ fn run() {
         power_preference: wgpu::PowerPreference::HighPerformance,
         compatible_surface: None,
         force_fallback_adapter: false,
+        ..Default::default()
     })).expect("Failed to create adapter");
     
     let adapter_info = adapter.get_info();
