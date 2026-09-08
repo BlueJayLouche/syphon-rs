@@ -3,6 +3,31 @@
 Versions match the crates published on
 [crates.io](https://crates.io/crates/syphon-core).
 
+## syphon-wgpu 0.4.2, syphon-metal 0.4.1 (2026-09-08)
+
+Cross-queue ordering on the **receive** path now uses `MTLSharedEvent`
+instead of blocking the CPU. Opt in with `SYPHON_WGPU_SYNC=event`; the
+bounded CPU drain stays the default until this is verified against an
+external publisher on hardware.
+
+A Syphon blit runs on its own `MTLCommandQueue`, so Metal's in-queue
+ordering never reaches wgpu, and the output texture had two unordered
+hazards — not one. The next blit overwriting a texture wgpu was still
+sampling was covered, by draining wgpu every frame. wgpu sampling before
+the blit landed was covered by nothing. Two shared events close both at
+no CPU cost.
+
+- **syphon-metal**: new `wgpu_interop::{SharedEvent, new_shared_event,
+  queue_wait_for_event, queue_signal_event, queue_take_pending_signal}`
+  (behind the `wgpu` feature). Additive; nothing existing changed.
+- **syphon-wgpu**: no API change. `SyphonWgpuInput` fences its blits when
+  the environment opts in.
+
+The **publish** path keeps its bounded drain and cannot be converted with
+wgpu-hal 30's API — it needs already-submitted work to signal, and
+`add_signal_event` only stages for the next submit. See the notes on
+`drain_wgpu_before_blit`.
+
 ## 0.3.0 (2026-07-09)
 
 Migrated off the deprecated `metal-rs` (`metal` crate) and, at the public
