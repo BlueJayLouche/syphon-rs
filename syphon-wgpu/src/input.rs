@@ -23,8 +23,81 @@ use objc2::runtime::ProtocolObject;
 #[cfg(target_os = "macos")]
 use objc2_metal::{
     MTLBlitCommandEncoder, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLOrigin,
-    MTLSize, MTLTexture,
+    MTLSharedEvent, MTLSize, MTLTexture,
 };
+#[cfg(target_os = "macos")]
+use syphon_metal::wgpu_interop::SharedEvent;
+
+/// Cross-queue ordering for the receive path, in place of a CPU drain.
+///
+/// The output texture is written by Syphon's command queue and read by wgpu's.
+/// Metal only orders command buffers within a single queue, so *both*
+/// directions need an explicit fence and neither comes for free:
+///
+/// * read-after-write — wgpu must not sample the texture until the blit lands.
+///   The blit signals `blit_done`; wgpu's next submit waits on it.
+/// * write-after-read — the next blit must not overwrite the texture while
+///   wgpu is still reading the last one. wgpu's submit signals `wgpu_done`;
+///   the next blit's command buffer waits on it.
+///
+/// Only the second of those was ever covered before, and by draining wgpu on
+/// the CPU. One counter drives both: frame `n` waits for `wgpu_done >= n - 1`,
+/// signals `blit_done = n`, and asks wgpu to signal `wgpu_done = n`.
+#[cfg(target_os = "macos")]
+struct EventSync {
+    blit_done: SharedEvent,
+    wgpu_done: SharedEvent,
+    /// Frames blitted through this path. Only ever increases: shared-event
+    /// waits are `>=`, so a counter that never rewinds can never pass early.
+    frame: u64,
+}
+
+#[cfg(target_os = "macos")]
+impl EventSync {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Option<Self> {
+        let blit_done = syphon_metal::wgpu_interop::new_shared_event(device)?;
+        let wgpu_done = syphon_metal::wgpu_interop::new_shared_event(device)?;
+        // Probe whether the queue can carry events at all, but do NOT arm
+        // anything yet. Strict ordering mode is irreversible and queue-wide —
+        // it adds a wait per command buffer and an extra command buffer per
+        // submit, to the whole app, for its lifetime. Arming it here cost a
+        // measured 1.8 fps on a set whose Syphon layer never connected and so
+        // never fenced a single frame. `queue_wait_for_event` enables it on
+        // the first real blit instead, where the cost buys something.
+        if !syphon_metal::wgpu_interop::queue_is_metal(queue) {
+            log::warn!(
+                "[SyphonWgpuInput] queue cannot carry shared events; using the CPU drain"
+            );
+            return None;
+        }
+        Some(Self { blit_done, wgpu_done, frame: 0 })
+    }
+}
+
+/// What a blit command buffer fences against.
+#[cfg(target_os = "macos")]
+struct BlitSync<'a> {
+    wgpu_done: &'a ProtocolObject<dyn MTLSharedEvent>,
+    wait_value: u64,
+    blit_done: &'a ProtocolObject<dyn MTLSharedEvent>,
+    signal_value: u64,
+}
+
+/// Whether to order the receive path with shared events instead of the CPU
+/// drain. Off unless `SYPHON_WGPU_SYNC=event`.
+///
+/// Both paths live in one binary deliberately. Comparing them across separate
+/// builds is unreliable here: a live publisher intermittently emits black
+/// frames, so a single run of a receive test proves nothing either way, and
+/// the variants have to be interleaved within one process to be judged.
+#[cfg(target_os = "macos")]
+fn event_sync_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        matches!(std::env::var("SYPHON_WGPU_SYNC").as_deref(), Ok("event"))
+    })
+}
 
 pub struct SyphonWgpuInput {
     client: Option<SyphonClient>,
@@ -38,6 +111,9 @@ pub struct SyphonWgpuInput {
     /// Present only when wgpu is backed by Metal.
     #[cfg(target_os = "macos")]
     metal_ctx: Option<syphon_metal::MetalContext>,
+    /// GPU-side ordering with wgpu's queue. `None` falls back to the CPU drain.
+    #[cfg(target_os = "macos")]
+    sync: Option<EventSync>,
 }
 
 impl SyphonWgpuInput {
@@ -48,6 +124,12 @@ impl SyphonWgpuInput {
     pub fn new(device: &wgpu::Device, _queue: &wgpu::Queue) -> Self {
         #[cfg(target_os = "macos")]
         let metal_ctx = Self::build_metal_ctx(device);
+        #[cfg(target_os = "macos")]
+        let sync = if metal_ctx.is_some() && event_sync_enabled() {
+            EventSync::new(device, _queue)
+        } else {
+            None
+        };
 
         Self {
             client: None,
@@ -57,6 +139,8 @@ impl SyphonWgpuInput {
             output_height: 0,
             #[cfg(target_os = "macos")]
             metal_ctx,
+            #[cfg(target_os = "macos")]
+            sync,
         }
     }
 
@@ -213,13 +297,16 @@ impl SyphonWgpuInput {
             let output = self.output_texture.as_ref().unwrap();
 
             // Attempt zero-copy GPU blit; fall back to CPU on failure.
-            // Poll wgpu before the Metal blit to ensure prior render work is done
-            // (wgpu 29 no longer exposes its MTLCommandQueue for cross-queue ordering).
-            let used_gpu = if let Some(ref ctx) = self.metal_ctx {
-                let _ = device.poll(wgpu::PollType::wait_indefinitely());
-                Self::gpu_blit(&frame, output, ctx.queue())
-            } else {
-                false
+            // Drain wgpu before the Metal blit so prior render work is done.
+            let used_gpu = match (&self.metal_ctx, &mut self.sync) {
+                (Some(ctx), Some(sync)) => {
+                    Self::blit_with_events(&frame, output, ctx.queue(), sync, device, queue)
+                }
+                (Some(ctx), None) => {
+                    crate::drain_wgpu_before_blit(device, "receive_texture");
+                    Self::gpu_blit(&frame, output, ctx.queue(), None)
+                }
+                (None, _) => false,
             };
 
             if !used_gpu {
@@ -271,15 +358,20 @@ impl SyphonWgpuInput {
     /// that read `output`.
     /// GPU-to-GPU blit using a dedicated Metal command queue.
     ///
-    /// In wgpu 29, `Queue::as_hal` no longer exposes the internal `MTLCommandQueue`,
-    /// so we use the queue from `MetalContext` instead. The caller must call
-    /// `device.poll(PollType::wait_indefinitely())` before invoking this to ensure
-    /// all prior wgpu rendering is complete on the GPU.
+    /// Submitted on `MetalContext`'s own queue. With `sync` the command buffer
+    /// fences itself against wgpu's queue; without it the caller must have
+    /// called `crate::drain_wgpu_before_blit` first.
+    ///
+    /// Note that committing on wgpu's own queue instead (wgpu-hal 30 re-exposes
+    /// it via `metal::Queue::as_raw()`) would not remove the need to fence:
+    /// Metal lets independent command buffers within one queue overlap on the
+    /// GPU, so sharing a queue orders nothing by itself.
     #[cfg(target_os = "macos")]
     fn gpu_blit(
         frame: &syphon_core::Frame,
         output: &wgpu::Texture,
         metal_queue: &ProtocolObject<dyn MTLCommandQueue>,
+        sync: Option<&BlitSync<'_>>,
     ) -> bool {
         let frame_tex_ptr = frame.metal_texture_ptr();
         if frame_tex_ptr.is_null() {
@@ -298,6 +390,11 @@ impl SyphonWgpuInput {
             wgpu_interop::with_metal_texture(output, |dst| {
                 let Some(dst) = dst else { return };
                 let Some(cmd) = metal_queue.commandBuffer() else { return };
+                // Waits and signals must be encoded outside any encoder, so
+                // this one goes in before the blit encoder is created.
+                if let Some(sync) = sync {
+                    cmd.encodeWaitForEvent_value(ProtocolObject::from_ref(sync.wgpu_done), sync.wait_value);
+                }
                 let Some(enc) = cmd.blitCommandEncoder() else { return };
                 unsafe {
                     enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
@@ -315,12 +412,69 @@ impl SyphonWgpuInput {
                     );
                 }
                 enc.endEncoding();
+                if let Some(sync) = sync {
+                    cmd.encodeSignalEvent_value(ProtocolObject::from_ref(sync.blit_done), sync.signal_value);
+                }
                 cmd.commit();
                 ok = true;
             });
         });
 
         ok
+    }
+
+    /// Blit with both hazards fenced on the GPU, no CPU block.
+    #[cfg(target_os = "macos")]
+    fn blit_with_events(
+        frame: &syphon_core::Frame,
+        output: &wgpu::Texture,
+        metal_queue: &ProtocolObject<dyn MTLCommandQueue>,
+        sync: &mut EventSync,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> bool {
+        // If last frame's signal is still sitting in the queue, wgpu never
+        // submitted, so `wgpu_done` never advanced and never will for that
+        // value. A command buffer waiting on it would park Syphon's queue on
+        // the GPU with nothing able to release it — a hang strictly worse than
+        // the CPU drain this replaces. Withdraw the stale signal, drain once,
+        // and start the chain over from a value that is already satisfied.
+        let stalled = syphon_metal::wgpu_interop::queue_take_pending_signal(queue, &sync.wgpu_done);
+        if stalled {
+            log::debug!(
+                "[SyphonWgpuInput] wgpu has not submitted since the last frame; \
+                 draining once and restarting the fence chain"
+            );
+            crate::drain_wgpu_before_blit(device, "receive_texture (resync)");
+        }
+
+        let n = sync.frame + 1;
+        let blit_sync = BlitSync {
+            wgpu_done: &sync.wgpu_done,
+            // Shared events start at 0 and waits are `>=`, so the first frame
+            // — and any resync — passes straight through.
+            wait_value: if stalled { 0 } else { sync.frame },
+            blit_done: &sync.blit_done,
+            signal_value: n,
+        };
+
+        if !Self::gpu_blit(frame, output, metal_queue, Some(&blit_sync)) {
+            return false;
+        }
+        sync.frame = n;
+
+        // Hold wgpu's reads until the blit lands, and have its submit release
+        // the *next* blit when those reads are done.
+        if !syphon_metal::wgpu_interop::queue_wait_for_event(queue, &sync.blit_done, n)
+            || !syphon_metal::wgpu_interop::queue_signal_event(queue, &sync.wgpu_done, n)
+        {
+            // The probe in `EventSync::new` passed, so this queue could carry
+            // events a moment ago. Nothing to undo — the blit is committed and
+            // correctly ordered against last frame; only this frame's
+            // read-after-write gate is missing.
+            log::warn!("[SyphonWgpuInput] could not stage frame {n} events on wgpu's queue");
+        }
+        true
     }
 
     pub fn server_name(&self) -> Option<&str> {

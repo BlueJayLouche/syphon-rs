@@ -157,7 +157,13 @@ fn run() {
             last_fps_print = Instant::now();
         }
         
-        // ~60 FPS target
-        std::thread::sleep(std::time::Duration::from_millis(16));
+        // ~60 FPS target. Spend the wait *in the CFRunLoop* rather than
+        // asleep: Syphon announces a server over distributed notifications,
+        // and without a run loop this process never publishes into the
+        // directory, so no other process can discover it.
+        unsafe {
+            use objc2_core_foundation::{CFRunLoopRunInMode, kCFRunLoopDefaultMode};
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.016, false);
+        }
     }
 }

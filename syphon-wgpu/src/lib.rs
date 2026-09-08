@@ -275,10 +275,8 @@ impl SyphonWgpuOutput {
 
         let mut published = false;
 
-        // In wgpu 29, the internal MTLCommandQueue is no longer accessible via
-        // wgpu-hal. We use our own metal_queue and poll wgpu first to ensure
-        // all prior GPU rendering is complete before we blit.
-        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        // We blit on our own metal_queue, so wgpu's prior work must land first.
+        drain_wgpu_before_blit(device, "publish_zero_copy");
 
         objc2::rc::autoreleasepool(|_| {
             wgpu_interop::with_metal_texture(texture, |src_texture| {
@@ -351,7 +349,7 @@ impl SyphonWgpuOutput {
         queue.submit(std::iter::once(encoder.finish()));
         
         // Wait for GPU
-        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        drain_wgpu_before_blit(device, "publish_cpu_fallback");
         
         // Map and upload
         let buffer_slice = buffer.slice(..);
@@ -472,6 +470,54 @@ pub fn list_servers() -> Vec<String> {
 /// Check if Syphon is available on this system
 pub fn is_available() -> bool {
     syphon_core::is_available()
+}
+
+
+/// Wait for wgpu's submitted GPU work before blitting on our own Metal queue.
+///
+/// The blit is submitted on a different `MTLCommandQueue` than wgpu's, so this
+/// wait is what orders it against wgpu's rendering.
+///
+/// The wait is **bounded**, and that is the point. An unbounded
+/// `wait_indefinitely()` here turns any stall in the GPU submission path into a
+/// permanent whole-app freeze: the render thread parks forever on a fence that a
+/// wedged, *serial* `com.Metal.CommandQueueDispatch` queue can never signal,
+/// because that same queue also services the completion callbacks that would
+/// signal it. A timeout costs one stale frame; no timeout costs the whole show.
+///
+/// Note that merely committing the blit to wgpu's own queue is NOT sufficient:
+/// Metal lets independent command buffers within one queue overlap on the GPU.
+///
+/// The **receive** path no longer needs this — it fences with `MTLSharedEvent`
+/// instead (`SYPHON_WGPU_SYNC=event`, see `input.rs`), which costs no CPU.
+///
+/// The **publish** path still does, and cannot be converted with today's API.
+/// It needs the opposite direction: wgpu work that is *already submitted* must
+/// signal before Syphon's blit reads the texture. `add_signal_event` only
+/// stages for the *next* submit, so it would have to be paired with a forced
+/// empty submit — and that command buffer is created inside `Queue::submit`
+/// rather than through `begin_encoding`, so strict mode does not gate it and
+/// Metal may run it alongside the still-running render work. Signalling early
+/// is worse than blocking: it hands Syphon a half-drawn frame. The unlock is
+/// either a hal API to signal an event from an already-submitted fence value
+/// (`metal::Fence::raw_shared_event` exists but is not reachable from
+/// `wgpu::Queue`), or a caller that stages the signal before its own submit.
+pub(crate) fn drain_wgpu_before_blit(device: &wgpu::Device, what: &str) {
+    const GPU_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
+
+    if device
+        .poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(GPU_WAIT_TIMEOUT),
+        })
+        .is_err()
+    {
+        log::warn!(
+            "[syphon-wgpu] {what}: GPU did not drain within {:?} — proceeding anyway. \
+             Repeated warnings mean the GPU submission path is backed up.",
+            GPU_WAIT_TIMEOUT
+        );
+    }
 }
 
 #[cfg(test)]
