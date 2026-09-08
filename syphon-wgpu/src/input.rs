@@ -213,10 +213,9 @@ impl SyphonWgpuInput {
             let output = self.output_texture.as_ref().unwrap();
 
             // Attempt zero-copy GPU blit; fall back to CPU on failure.
-            // Poll wgpu before the Metal blit to ensure prior render work is done
-            // (wgpu 29 no longer exposes its MTLCommandQueue for cross-queue ordering).
+            // Drain wgpu before the Metal blit so prior render work is done.
             let used_gpu = if let Some(ref ctx) = self.metal_ctx {
-                let _ = device.poll(wgpu::PollType::wait_indefinitely());
+                crate::drain_wgpu_before_blit(device, "receive_texture");
                 Self::gpu_blit(&frame, output, ctx.queue())
             } else {
                 false
@@ -271,10 +270,15 @@ impl SyphonWgpuInput {
     /// that read `output`.
     /// GPU-to-GPU blit using a dedicated Metal command queue.
     ///
-    /// In wgpu 29, `Queue::as_hal` no longer exposes the internal `MTLCommandQueue`,
-    /// so we use the queue from `MetalContext` instead. The caller must call
-    /// `device.poll(PollType::wait_indefinitely())` before invoking this to ensure
-    /// all prior wgpu rendering is complete on the GPU.
+    /// Submitted on `MetalContext`'s own queue, so the caller must call
+    /// `crate::drain_wgpu_before_blit` first to ensure all prior wgpu rendering
+    /// is complete on the GPU.
+    ///
+    /// wgpu-hal 30 *does* re-expose wgpu's queue (`metal::Queue::as_raw()`), but
+    /// committing here instead does not remove the need to wait: Metal lets
+    /// independent command buffers within one queue overlap on the GPU. Proper
+    /// GPU-side ordering needs `MTLSharedEvent` via
+    /// `metal::Queue::{add_wait_event, add_signal_event}`.
     #[cfg(target_os = "macos")]
     fn gpu_blit(
         frame: &syphon_core::Frame,

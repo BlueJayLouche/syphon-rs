@@ -275,10 +275,8 @@ impl SyphonWgpuOutput {
 
         let mut published = false;
 
-        // In wgpu 29, the internal MTLCommandQueue is no longer accessible via
-        // wgpu-hal. We use our own metal_queue and poll wgpu first to ensure
-        // all prior GPU rendering is complete before we blit.
-        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        // We blit on our own metal_queue, so wgpu's prior work must land first.
+        drain_wgpu_before_blit(device, "publish_zero_copy");
 
         objc2::rc::autoreleasepool(|_| {
             wgpu_interop::with_metal_texture(texture, |src_texture| {
@@ -351,7 +349,7 @@ impl SyphonWgpuOutput {
         queue.submit(std::iter::once(encoder.finish()));
         
         // Wait for GPU
-        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        drain_wgpu_before_blit(device, "publish_cpu_fallback");
         
         // Map and upload
         let buffer_slice = buffer.slice(..);
@@ -481,5 +479,41 @@ mod tests {
     #[test]
     fn test_availability() {
         println!("Syphon available: {}", is_available());
+    }
+}
+
+/// Wait for wgpu's submitted GPU work before blitting on our own Metal queue.
+///
+/// The blit is submitted on a different `MTLCommandQueue` than wgpu's, so this
+/// wait is what orders it against wgpu's rendering.
+///
+/// The wait is **bounded**, and that is the point. An unbounded
+/// `wait_indefinitely()` here turns any stall in the GPU submission path into a
+/// permanent whole-app freeze: the render thread parks forever on a fence that a
+/// wedged, *serial* `com.Metal.CommandQueueDispatch` queue can never signal,
+/// because that same queue also services the completion callbacks that would
+/// signal it. A timeout costs one stale frame; no timeout costs the whole show.
+///
+/// ponytail: a CPU stall per frame is the price of cross-queue ordering. The
+/// upgrade path is GPU-side sync via `MTLSharedEvent` —
+/// `wgpu_hal::metal::Queue::{add_wait_event, add_signal_event,
+/// enable_strict_event_sync}` exist for exactly this and block no CPU. Note that
+/// merely committing the blit to wgpu's own queue is NOT sufficient: Metal lets
+/// independent command buffers within one queue overlap on the GPU.
+pub(crate) fn drain_wgpu_before_blit(device: &wgpu::Device, what: &str) {
+    const GPU_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
+
+    if device
+        .poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(GPU_WAIT_TIMEOUT),
+        })
+        .is_err()
+    {
+        log::warn!(
+            "[syphon-wgpu] {what}: GPU did not drain within {:?} — proceeding anyway. \
+             Repeated warnings mean the GPU submission path is backed up.",
+            GPU_WAIT_TIMEOUT
+        );
     }
 }
