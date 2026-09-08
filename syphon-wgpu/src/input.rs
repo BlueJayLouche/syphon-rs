@@ -57,11 +57,14 @@ impl EventSync {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Option<Self> {
         let blit_done = syphon_metal::wgpu_interop::new_shared_event(device)?;
         let wgpu_done = syphon_metal::wgpu_interop::new_shared_event(device)?;
-        // Probe the queue once rather than discovering per frame that it
-        // cannot carry events. Waiting for 0 is already satisfied, so the
-        // staged wait costs the next submit nothing; the call also puts the
-        // queue into strict ordering mode up front.
-        if !syphon_metal::wgpu_interop::queue_wait_for_event(queue, &blit_done, 0) {
+        // Probe whether the queue can carry events at all, but do NOT arm
+        // anything yet. Strict ordering mode is irreversible and queue-wide —
+        // it adds a wait per command buffer and an extra command buffer per
+        // submit, to the whole app, for its lifetime. Arming it here cost a
+        // measured 1.8 fps on a set whose Syphon layer never connected and so
+        // never fenced a single frame. `queue_wait_for_event` enables it on
+        // the first real blit instead, where the cost buys something.
+        if !syphon_metal::wgpu_interop::queue_is_metal(queue) {
             log::warn!(
                 "[SyphonWgpuInput] queue cannot carry shared events; using the CPU drain"
             );

@@ -325,6 +325,16 @@ pub mod wgpu_interop {
         extract_metal_device(device)?.newSharedEvent()
     }
 
+    /// Whether this queue is Metal-backed, and so able to carry shared events.
+    ///
+    /// Side-effect free on purpose: unlike [`queue_wait_for_event`] it does not
+    /// enable strict ordering, so a caller can check capability up front without
+    /// taxing every submit in the process for the rest of its life.
+    pub fn queue_is_metal(queue: &wgpu::Queue) -> bool {
+        // SAFETY: as_hal only requires the queue to be alive.
+        unsafe { queue.as_hal::<wgpu_hal::api::Metal>() }.is_some()
+    }
+
     /// Stage a GPU-side wait: nothing wgpu submits next begins before `event`
     /// reaches `value`.
     ///
