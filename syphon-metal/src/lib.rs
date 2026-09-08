@@ -277,7 +277,11 @@ impl MetalContext {
 pub mod wgpu_interop {
     use objc2::rc::Retained;
     use objc2::runtime::ProtocolObject;
-    use objc2_metal::{MTLDevice, MTLTexture};
+    use objc2_metal::{MTLDevice, MTLSharedEvent, MTLTexture};
+
+    /// A Metal shared event, the handle used to order work between wgpu's
+    /// command queue and a queue wgpu knows nothing about.
+    pub type SharedEvent = Retained<ProtocolObject<dyn MTLSharedEvent>>;
 
     /// Extract the Metal device backing a wgpu device.
     ///
@@ -306,6 +310,75 @@ pub mod wgpu_interop {
             Some(hal_guard) => f(Some(hal_guard.raw_handle())),
             None => f(None),
         }
+    }
+
+    /// Create an `MTLSharedEvent` on the Metal device backing `device`.
+    ///
+    /// A shared event is the only Metal primitive that orders work across
+    /// *different* command queues without parking a CPU thread, which is what
+    /// Syphon needs: its blits run on their own queue, not wgpu's, so Metal's
+    /// in-queue ordering guarantee does not reach them.
+    ///
+    /// Returns `None` when the device is not Metal-backed or the event could
+    /// not be allocated.
+    pub fn new_shared_event(device: &wgpu::Device) -> Option<SharedEvent> {
+        extract_metal_device(device)?.newSharedEvent()
+    }
+
+    /// Stage a GPU-side wait: nothing wgpu submits next begins before `event`
+    /// reaches `value`.
+    ///
+    /// Also switches the queue into strict ordering mode. Without it the wait
+    /// is encoded on an internal command buffer that Metal is free to run
+    /// concurrently with the user's, so it would gate nothing — see
+    /// `wgpu_hal::metal::Queue::enable_strict_event_sync`.
+    ///
+    /// Staging is queue-wide: the wait is consumed by whichever `Queue::submit`
+    /// runs next, whoever makes it. That composes correctly for several
+    /// receivers feeding one render thread (their waits land on the same
+    /// command buffer), but not for producers submitting from several threads.
+    ///
+    /// Returns `false` if the queue is not Metal-backed or strict mode could
+    /// not be enabled; the caller must then fall back to a CPU wait.
+    pub fn queue_wait_for_event(queue: &wgpu::Queue, event: &SharedEvent, value: u64) -> bool {
+        // SAFETY: as_hal only requires the queue to be alive, which the
+        // reference guarantees.
+        let Some(hal_queue) = (unsafe { queue.as_hal::<wgpu_hal::api::Metal>() }) else {
+            return false;
+        };
+        if hal_queue.enable_strict_event_sync().is_err() {
+            return false;
+        }
+        hal_queue.add_wait_event(event.clone(), value);
+        true
+    }
+
+    /// Stage a GPU-side signal: wgpu's next submit raises `event` to `value`
+    /// once that submit's work has completed.
+    ///
+    /// Returns `false` if the queue is not Metal-backed.
+    pub fn queue_signal_event(queue: &wgpu::Queue, event: &SharedEvent, value: u64) -> bool {
+        // SAFETY: as_hal only requires the queue to be alive.
+        let Some(hal_queue) = (unsafe { queue.as_hal::<wgpu_hal::api::Metal>() }) else {
+            return false;
+        };
+        hal_queue.add_signal_event(event.clone(), value);
+        true
+    }
+
+    /// Withdraw a signal staged by [`queue_signal_event`], reporting whether it
+    /// was still waiting to be sent.
+    ///
+    /// `true` means no submit happened since it was staged, so that event value
+    /// was never going to arrive. Anything waiting on it on another queue would
+    /// have hung, which is why the caller checks this before making a command
+    /// buffer wait.
+    pub fn queue_take_pending_signal(queue: &wgpu::Queue, event: &SharedEvent) -> bool {
+        // SAFETY: as_hal only requires the queue to be alive.
+        let Some(hal_queue) = (unsafe { queue.as_hal::<wgpu_hal::api::Metal>() }) else {
+            return false;
+        };
+        hal_queue.remove_signal_event(event)
     }
 }
 
