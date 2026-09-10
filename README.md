@@ -258,19 +258,86 @@ All `wgpu-hal` Metal API calls are isolated in `syphon_metal::wgpu_interop`
   plain `clone()`/borrow. Keep the workspace's `objc2-metal` version in sync
   with the one wgpu-hal resolves.
 
-## Building for Production
+## Linking from your own crate
 
-```bash
-# Build with the bundled framework
-cargo build --release
-# The framework is linked from syphon-lib/Syphon.framework
+Add `syphon-wgpu` (or `syphon-core`) and it builds with no further setup —
+`syphon-core` reassembles its bundled `Syphon.framework` in its `OUT_DIR` and
+emits the framework search path and link libraries, which propagate to you
+normally.
+
+**Runtime search paths do not propagate, though.** `cargo:rustc-link-arg`
+applies only to the emitting package's own targets, so the `-rpath` that
+`syphon-core` adds for its own tests and examples never reaches your binary.
+Without one, `dyld` falls back to whatever is in `/Library/Frameworks` — and if
+that copy predates Apple Silicon it is x86_64-only, which aborts the launch:
+
+```
+dyld[…]: Library not loaded: @rpath/Syphon.framework/Versions/A/Syphon
+  Reason: … (mach-o file, but is an incompatible architecture (have 'x86_64', need 'arm64'))
 ```
 
-To create a standalone app bundle:
+`dyld` resolves `@rpath` against the first *match*, not the first *loadable*
+match, so a stale system copy earlier in the search path wins over a perfectly
+good bundled one.
+
+So each crate that produces a **binary** linking Syphon — every leaf binary, and
+any library whose own tests or examples link it — needs a `build.rs` of its own.
+Because `syphon-core` declares `links = "Syphon"`, it exports the directory it
+linked against as `DEP_SYPHON_FRAMEWORK_DIR`:
+
+```rust
+// build.rs
+fn main() {
+    #[cfg(target_os = "macos")]
+    {
+        // The framework syphon-core linked against. Listed first so a stale
+        // x86_64-only copy in /Library/Frameworks cannot shadow it.
+        if let Ok(dir) = std::env::var("DEP_SYPHON_FRAMEWORK_DIR") {
+            println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
+        }
+        println!("cargo:rustc-link-arg=-Wl,-rpath,/Library/Frameworks");
+        // So a packaged .app can carry its own copy:
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path/../Frameworks");
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path/../Frameworks");
+
+        println!("cargo:rerun-if-changed=build.rs");
+        println!("cargo:rerun-if-env-changed=DEP_SYPHON_FRAMEWORK_DIR");
+    }
+}
+```
+
+Cargo sets `DEP_*` variables for **direct** dependents only. If a crate needs
+the rpath but has no Syphon code of its own — a binary that reaches Syphon
+through an intermediate library, say — give it a dependency anyway so the
+metadata is visible, and comment it so nobody prunes it as unused:
+
+```toml
+[target.'cfg(target_os = "macos")'.dependencies]
+# Not used in code: makes syphon-core's `links = "Syphon"` metadata
+# (DEP_SYPHON_FRAMEWORK_DIR) visible to build.rs, which needs it for the rpath.
+syphon-core = "0.4"
+```
+
+`syphon-examples/build.rs` is a working copy of this pattern.
+
+### Shipping an app bundle
+
+The `DEP_SYPHON_FRAMEWORK_DIR` rpath points into `target/`, so it is a
+development convenience — `cargo clean` invalidates it. A distributable `.app`
+should carry the framework itself, which the `@executable_path` rpath above
+then finds:
 
 ```bash
 cp -R syphon-lib/Syphon.framework MyApp.app/Contents/Frameworks/
 codesign --force --deep --sign - MyApp.app
+```
+
+Consuming from crates.io rather than a checkout? Take the framework from the
+crate's build directory instead of `syphon-lib/`:
+
+```bash
+cp -R "$(find target/release/build -type d -name Syphon.framework | head -1)" \
+      MyApp.app/Contents/Frameworks/
 ```
 
 ## Documentation
@@ -289,15 +356,37 @@ git submodule update --init syphon-lib/Syphon-Framework
 
 ## Troubleshooting
 
-### "framework 'Syphon' not found"
+### "framework 'Syphon' not found" at build time
+
+`syphon-core` bundles the framework, so this should not happen from a normal
+`cargo build`. If it does, the payload is missing or unreadable — check that
+`syphon-core/frameworks/Versions/A/Syphon` exists. As a stopgap you can point
+the linker at the in-repo copy:
 
 ```bash
-# Install system-wide (optional)
-sudo cp -R syphon-lib/Syphon.framework /Library/Frameworks/
-
-# Or set the search path at runtime
 export DYLD_FRAMEWORK_PATH="$PWD/syphon-lib"
 ```
+
+### "Library not loaded: @rpath/Syphon.framework" at launch
+
+The binary has no rpath that resolves to a loadable framework. Two causes:
+
+1. **Your crate has no `build.rs` emitting an rpath.** See
+   [Linking from your own crate](#linking-from-your-own-crate) — this is the
+   common case, since `syphon-core` cannot add one on your behalf.
+2. **A stale copy in `/Library/Frameworks` is shadowing the good one.** If the
+   error says `incompatible architecture (have 'x86_64', need 'arm64')`, an old
+   installer left a pre-Apple-Silicon build there:
+
+   ```bash
+   # Should list arm64; a bare `x86_64` is the stale case
+   lipo -archs /Library/Frameworks/Syphon.framework/Versions/A/Syphon
+   ```
+
+   Replace it with a [current
+   release](https://github.com/Syphon/Syphon-Framework/releases) or remove it
+   and let the bundled framework be found. Installing system-wide is never
+   required, and an outdated copy there will break other Syphon apps too.
 
 ### Zero-copy not working (Server)
 
