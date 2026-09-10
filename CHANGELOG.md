@@ -3,6 +3,42 @@
 Versions match the crates published on
 [crates.io](https://crates.io/crates/syphon-core).
 
+## Unreleased
+
+Documentation and `syphon-examples` only — no published crate changed, so
+nothing here needs a version bump.
+
+Downstream crates were hitting a launch-time failure that looked like a
+packaging bug in `syphon-core`:
+
+```
+dyld[…]: Library not loaded: @rpath/Syphon.framework/Versions/A/Syphon
+  Reason: … (have 'x86_64', need 'arm64')
+```
+
+The framework is bundled and universal, but `cargo:rustc-link-arg` applies
+only to the emitting package's own targets — so the `-rpath` `syphon-core`
+adds for its tests and examples never reaches a dependent's binary. Those
+binaries were left with `/Library/Frameworks` as their only Syphon search
+path, which breaks as soon as the copy there is a pre-Apple-Silicon,
+x86_64-only build left by an old installer. `dyld` resolves `@rpath` against
+the first *match*, not the first *loadable* match, so the stale copy wins.
+
+- **README**: new "Linking from your own crate" section with the `build.rs`
+  recipe using `DEP_SYPHON_FRAMEWORK_DIR`, which `links = "Syphon"` already
+  exported but nothing documented. Covers why the dependency is needed even
+  for crates with no Syphon code (Cargo sets `DEP_*` for direct dependents
+  only), and how to bundle the framework into a `.app` when consuming from
+  crates.io. Troubleshooting gains an entry for the error above; the old
+  entry recommending `sudo cp -R … /Library/Frameworks/` is gone, since that
+  is what creates the stale copy in the first place.
+- **syphon-examples**: `build.rs` now takes the framework from
+  `DEP_SYPHON_FRAMEWORK_DIR` and orders it ahead of `/Library/Frameworks`,
+  replacing a hardcoded `../syphon-lib` path that only worked inside a
+  workspace checkout. Also drops its redundant `rustc-link-lib` lines —
+  those propagate from `syphon-core` normally, unlike link args. It now
+  serves as the reference implementation the README points to.
+
 ## syphon-wgpu 0.4.3, syphon-metal 0.4.2 (2026-09-08)
 
 Fixes a performance defect in 0.4.2's receive fences. **Supersedes 0.4.2 —
