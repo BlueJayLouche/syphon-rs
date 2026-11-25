@@ -87,6 +87,9 @@ fn main() {
     let mut frame_no = 0u32;
     let start = std::time::Instant::now();
     let mut received: Vec<(u8, u8, u8, u8)> = Vec::new(); // first-pixel BGRA per received frame
+    // Push mode: the framework's new-frame handler (an ObjC block) signals here.
+    let mut frame_signals: Option<std::sync::mpsc::Receiver<()>> = None;
+    let mut signalled = 0usize;
 
     while start.elapsed().as_secs() < 30 {
         frame_no += 1;
@@ -118,11 +121,12 @@ fn main() {
             let servers = syphon_core::SyphonServerDirectory::servers();
             if let Some(info) = servers.iter().find(|s| s.name == server_name) {
                 println!("✓ server discovered via directory (app: {})", info.app_name);
-                input.connect_by_info(info).expect("connect_by_info");
+                frame_signals = Some(input.connect_by_info_with_channel(info).expect("connect_by_info_with_channel"));
                 connected = true;
                 println!("✓ client connected");
             }
         } else {
+            signalled += frame_signals.as_ref().map_or(0, |rx| rx.try_iter().count());
             if input.receive_texture(&device, &queue) {
                 let tex = input.output_texture().expect("output texture");
                 let data = read_back(&device, &queue, tex, w, h);
@@ -140,6 +144,7 @@ fn main() {
 
     assert!(connected, "FAIL: never discovered/connected to loopback server");
     assert!(received.len() >= 5, "FAIL: only received {} frames", received.len());
+    assert!(signalled > 0, "FAIL: the new-frame handler block never fired");
     // Frames must contain real data: alpha 255, green channel ~128 everywhere.
     for &(_b, g, _r, a) in &received {
         assert_eq!(a, 255, "alpha channel wrong — garbage frame?");
@@ -151,5 +156,5 @@ fn main() {
         "FAIL: pixel data identical across frames — stale/garbage transfer?"
     );
 
-    println!("\n✓✓ VERIFIED: zero-copy sender → Syphon → zero-copy receiver, {} frames with correct, changing pixel data", received.len());
+    println!("\n✓✓ VERIFIED: zero-copy sender → Syphon → zero-copy receiver, {} frames with correct, changing pixel data, new-frame handler fired {} times", received.len(), signalled);
 }

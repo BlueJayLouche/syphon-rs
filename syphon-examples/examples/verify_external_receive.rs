@@ -70,8 +70,8 @@ fn main() {
             submission_index: None, timeout: Some(std::time::Duration::from_secs(2)) });
         assert!(rx.recv().unwrap(), "map failed");
         let d = slice.get_mapped_range().unwrap();
-        let nonzero = d.chunks_exact(4).filter(|p| p[0] | p[1] | p[2] != 0).count();
-        let maxv = d.chunks_exact(4).map(|p| p[0].max(p[1]).max(p[2])).max().unwrap_or(0);
+        let nonzero = d.as_chunks::<4>().0.iter().filter(|p| p[0] | p[1] | p[2] != 0).count();
+        let maxv = d.as_chunks::<4>().0.iter().map(|p| p[0].max(p[1]).max(p[2])).max().unwrap_or(0);
         let total = (w * h) as usize;
         let px = [d[0], d[1], d[2], d[3]];
         drop(d); buf.unmap();

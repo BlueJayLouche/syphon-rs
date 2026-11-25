@@ -3,7 +3,7 @@
 Metal and IOSurface utilities for [Syphon](https://syphon.v002.info/) on macOS —
 the plumbing for zero-copy GPU-to-GPU frame sharing.
 
-Built on top of [`syphon-core`](https://crates.io/crates/syphon-core). If you use
+Companion to [`syphon-core`](https://crates.io/crates/syphon-core). If you use
 wgpu, prefer the higher-level [`syphon-wgpu`](https://crates.io/crates/syphon-wgpu)
 crate; reach for this one when integrating directly with Metal.
 
@@ -28,8 +28,7 @@ let ctx = MetalContext::system_default().expect("Metal not available");
 let pool = IOSurfacePool::new(1920, 1080, 3);
 
 let surface = pool.acquire().unwrap();
-let texture = ctx.create_texture_from_iosurface(&surface, 1920, 1080)?;
-# Ok::<(), syphon_core::SyphonError>(())
+let texture = ctx.create_texture_from_iosurface(&surface, 1920, 1080).expect("texture");
 ```
 
 ## Feature flags

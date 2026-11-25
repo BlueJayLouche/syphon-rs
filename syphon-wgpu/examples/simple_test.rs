@@ -69,7 +69,7 @@ fn main() {
         syphon.publish(&texture, &device, &queue);
         
         frame += 1;
-        if frame % 60 == 0 {
+        if frame.is_multiple_of(60) {
             let fps = frame as f64 / start.elapsed().as_secs_f64();
             println!("📡 {} clients | {} frames | {:.1} FPS", 
                 syphon.client_count(), frame, fps);

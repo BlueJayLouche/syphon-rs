@@ -3,10 +3,36 @@
 Versions match the crates published on
 [crates.io](https://crates.io/crates/syphon-core).
 
+## syphon-core 0.4.1 (2026-11-25)
+
+Clears cargo's "code that will be rejected by a future version of Rust"
+warning for everyone downstream: `syphon-core` no longer depends on
+`block` 0.1.6.
+
+- The new-frame handler is a `block2::RcBlock` (objc2 0.6, already a
+  dependency) instead of `block::ConcreteBlock`.
+- `publish_metal_texture` passes a local `#[repr(C)]` rect instead of
+  `cocoa::foundation::NSRect`, which drops `cocoa`.
+- Removed dependencies that were never used: `objc-foundation` (which also
+  pulled in `block` 0.1.6), `core-graphics`, `thiserror`.
+
+No API change. Verified with `verify_loopback`, which now connects in push
+mode and asserts that the new-frame handler block fires.
+
 ## Unreleased
 
-Documentation and `syphon-examples` only — no published crate changed, so
-nothing here needs a version bump.
+No published crate needs a version bump for these.
+
+- **syphon-metal** drops its `syphon-core` dependency, which it never used.
+  Its README example also claimed a `SyphonError` result for a function that
+  returns `Option`.
+- **syphon-wgpu** gains a `build.rs` that adds the `Syphon.framework` rpath to
+  its own tests and examples (its lib tests failed with the `dyld` error
+  below).
+- **Workspace**: removed the unused `[workspace.package]` table, and fixed the
+  examples' newer clippy lints.
+
+Earlier documentation and `syphon-examples` changes:
 
 Downstream crates were hitting a launch-time failure that looked like a
 packaging bug in `syphon-core`:

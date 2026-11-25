@@ -139,7 +139,7 @@ fn main() {
                             );
 
                             // Print every 30th frame to avoid spam
-                            if frame_count % 30 == 0 {
+                            if frame_count.is_multiple_of(30) {
                                 println!("{}", info);
                             }
 
