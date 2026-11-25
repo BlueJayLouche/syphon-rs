@@ -3,7 +3,7 @@
 Versions match the crates published on
 [crates.io](https://crates.io/crates/syphon-core).
 
-## syphon-core 0.4.1 (unreleased)
+## syphon-core 0.4.1 (2026-11-25)
 
 Clears cargo's "code that will be rejected by a future version of Rust"
 warning for everyone downstream: `syphon-core` no longer depends on
