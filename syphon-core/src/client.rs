@@ -146,7 +146,7 @@ impl Frame {
 
 // ---------------------------------------------------------------------------
 
-/// Wraps `block::RcBlock` to make it `Send + Sync`.
+/// Wraps `block2::RcBlock` to make it `Send + Sync`.
 ///
 /// SAFETY: The block captures only `SyncSender<()>`, which is `Send + Sync`.
 /// The Syphon framework may fire the handler from any thread, so the block
@@ -155,7 +155,7 @@ impl Frame {
 #[cfg(target_os = "macos")]
 struct FrameHandlerBlock(
     // Held solely to keep the registered block alive; never read back.
-    #[allow(dead_code)] block::RcBlock<(*mut objc::runtime::Object,), ()>,
+    #[allow(dead_code)] block2::RcBlock<dyn Fn(*mut objc2::runtime::AnyObject)>,
 );
 #[cfg(target_os = "macos")]
 unsafe impl Send for FrameHandlerBlock {}
@@ -416,11 +416,11 @@ impl SyphonClient {
         let (handler_ptr, handler_block): (*mut Object, Option<Box<dyn std::any::Any>>) =
             match tx {
                 Some(sender) => {
-                    let blk = block::ConcreteBlock::new(move |_client: *mut Object| {
+                    let blk = block2::RcBlock::new(move |_client: *mut objc2::runtime::AnyObject| {
                         // Non-blocking: drop the signal if the receiver is full or gone.
                         let _ = sender.try_send(());
-                    }).copy();
-                    let ptr = &*blk as *const _ as *mut Object;
+                    });
+                    let ptr = block2::RcBlock::as_ptr(&blk).cast::<Object>();
                     (ptr, Some(Box::new(FrameHandlerBlock(blk))))
                 }
                 None => (std::ptr::null_mut(), None),

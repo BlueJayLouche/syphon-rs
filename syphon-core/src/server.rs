@@ -218,16 +218,22 @@ impl SyphonServer {
         texture: *mut objc2::runtime::AnyObject,        // id<MTLTexture>
         command_buffer: *mut objc2::runtime::AnyObject, // id<MTLCommandBuffer>
     ) {
-        use cocoa::foundation::{NSRect, NSPoint, NSSize};
         use objc::rc::autoreleasepool;
+
+        // `NSRect` by value: same layout and ABI as `CGRect` (four f64s).
+        #[repr(C)]
+        struct NSRect {
+            origin: [f64; 2],
+            size: [f64; 2],
+        }
 
         let texture: *mut Object = texture.cast();
         let command_buffer: *mut Object = command_buffer.cast();
 
         autoreleasepool(|| {
             let region = NSRect {
-                origin: NSPoint::new(0.0, 0.0),
-                size: NSSize::new(self.width as f64, self.height as f64),
+                origin: [0.0, 0.0],
+                size: [self.width as f64, self.height as f64],
             };
             let _: () = msg_send![
                 &*self.inner,

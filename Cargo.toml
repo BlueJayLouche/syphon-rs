@@ -7,12 +7,6 @@ members = [
 ]
 resolver = "2"
 
-[workspace.package]
-edition = "2024"
-authors = ["BlueJayLouche <bluejaylouche@gmail.com>"]
-license = "MIT"
-repository = "https://github.com/BlueJayLouche/syphon-rs"
-
 [workspace.lints.rust]
 # syphon-core's internals still use `objc 0.2`, whose `msg_send!` macro expands
 # to `#[cfg(feature = "cargo-clippy")]` — newer rustc flags it under check-cfg.
